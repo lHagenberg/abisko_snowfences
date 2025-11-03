@@ -1,0 +1,219 @@
+---
+title: "sf_pp_data_wrangling"
+author: "Liyenne"
+date: "2023-10-09"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+```{r include = FALSE} 
+setwd("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis") 
+
+require(tidyverse)
+
+require(openxlsx)
+```
+
+```{r echo = FALSE}
+# vascular plant pinpoint data
+vp_pp <- readr::read_csv("../../2_input/1_raw_data/sf_vp_pp_data_2023_v1.csv")
+
+# vascular plant pinpoint data (flux plot)
+vp_pp_flux <- readr::read_csv("../../2_input/1_raw_data/sf_flux_vp_pp_data_2023_v1.csv")
+
+# vascular plant species list
+vp_sp_list <- readr::read_csv("../../2_input/1_raw_data/sf_vp_species_list.csv")
+
+# plot data
+plot_data <- readr::read_csv("../../2_input/1_raw_data/sf_plot_data_2023.csv")
+```
+
+# create acronyms for each species
+```{r}
+vp_sp_list$sp <- NA
+
+vp_sp_list <- vp_sp_list %>% 
+  select(sp, everything())
+
+for (i in 1:nrow(vp_sp_list)) {
+  # Input string
+sp <- as.character(vp_sp_list[i, 2])
+
+# Split the string into words
+words <- unlist(strsplit(sp, " "))
+
+# Extract the first three letters from each word
+first_three_letters <- sapply(words, function(word) substr(word, 1, 3))
+
+# Combine the extracted letters into a new string
+sp_acronym <- paste(first_three_letters, collapse = "")
+
+# Print the result
+vp_sp_list[i, 1] <- sp_acronym
+
+rm(sp, words, first_three_letters, sp_acronym)
+}
+
+vp_sp_list %>% 
+  head(10)
+```
+
+# Transpose data
+**large plot**
+```{r}
+vp_pp_l <- vp_pp %>%
+  pivot_longer(!species, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, hits) %>% 
+  replace_na(list(hits = 0))
+
+vp_pp_l %>% 
+  head(10)
+```
+
+**flux plot**
+```{r}
+vp_pp_flux_l <- vp_pp_flux %>%
+  pivot_longer(!species, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, hits) %>% 
+  replace_na(list(hits = 0))
+
+vp_pp_flux_l %>% 
+  head(10)
+```
+
+# Merge data
+Data collected in small sub plots (40 x 50 cm, 30 pins) were kept separately be related to flux measurements. Data of these flux plots will be merged with the large plots. 
+```{r}
+vp_pp_l <- full_join(vp_pp_l, vp_pp_flux_l, by = c("species", "plot")) %>% 
+  replace_na(list(hits.x = 0, hits.y = 0))
+
+vp_pp_l <- vp_pp_l %>% 
+  mutate(hits = hits.x + hits.y) %>% 
+  select(plot, species, hits) 
+
+extr_3 <- function(string) {
+  # Split the string into words
+  words <- strsplit(string, " ")[[1]]
+  # Extract the first three letters from each word
+  first_three_letters <- sapply(words, substr, 1, 3)
+  # Return the first three letters of each word
+  first_three_letters <- paste(first_three_letters, collapse = "")
+  return(first_three_letters)
+}
+
+# get shortened species names
+vp_pp_l$spec <- NA
+
+for (i in 1:nrow(vp_pp_l)) {
+  extr <- extr_3(as.data.frame(vp_pp_l)[i, 2]) 
+  vp_pp_l[i, 4] <- extr
+  rm(extr)
+}
+
+vp_pp_l <- vp_pp_l %>% 
+  select(plot, spec, hits) 
+
+vp_pp_l %>% 
+  head(10)
+```
+
+```{r include=FALSE}
+vp_pp_l %>%
+  readr::write_csv('../../3_output/1_data_products/vp_pp_2023_l.csv')
+```
+
+```{r}
+vp_pp_w <- vp_pp_l %>% 
+    pivot_wider(names_from = spec, values_from = hits)
+
+vp_pp_w %>% 
+  head(10)
+```
+
+```{r include=FALSE}
+vp_pp_w %>%
+  readr::write_csv('../../3_output/1_data_products/vp_pp_2023_w.csv')
+```
+
+# Get plot level statistics
+```{r}
+plot_stats <- plot_data %>% 
+  select(plot, habitat, site, treatment) 
+  
+plot_stats <- vp_sp_list %>%
+  select(spec, group) %>% 
+  left_join(vp_pp_l, ., by = "spec") %>% 
+  group_by(plot, group) %>% 
+  summarise(type_hits = sum(hits)) %>%
+  pivot_wider(names_from = group, values_from = type_hits) %>% 
+  left_join(plot_stats, ., by = "plot") 
+
+plot_stats %>% 
+  head(10)
+
+plot_stats %>%
+  readr::write_csv('../../3_output/1_data_products/plot_stats_veg_2023.csv')
+```
+
+```{r species lists}
+list_list <- list()
+plots <- unique(vp_pp_l$plot)
+
+for (i in 1:length(plots)) {
+  x <- vp_pp_l %>% 
+    filter(plot == plots[i]) %>% 
+    filter(hits > 0)
+  
+  list_list[[i]] <- x
+}
+
+# iniate workbook object
+wb <- createWorkbook()
+
+# write data to worksheets in the workbook object
+for (i in 1:length(plots)) {
+  addWorksheet(wb, plots[i])
+  
+  x <- list_list[[i]]
+  writeData(wb, i, x)
+}
+
+# save the workbook to a file
+saveWorkbook(wb, "speclist_plots.xlsx")
+```
+
+```{r}
+x <- vp_pp_l %>% 
+  filter(hits > 0) %>% 
+  group_by(spec) %>% 
+  summarise(n_plots = n_distinct(plot)) 
+
+sum(x$n_plots)
+```
+
+```{r}
+y <- vp_pp_l %>% 
+  group_by(spec) %>% 
+  summarise(n_hits = sum(hits)) %>% 
+  arrange(desc(n_hits))
+```
+
+```{r}
+left_join(x, y) %>%
+  mutate(hits_plot = n_hits / n_plots) %>% 
+  arrange(desc(hits_plot)) 
+```
+
+
+

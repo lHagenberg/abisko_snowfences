@@ -1,0 +1,238 @@
+---
+title: "sf_analysis"
+author: "Liyenne"
+date: "2023-10-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+```{r packages}
+setwd("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis")
+
+require(readr)
+require(tidyverse)
+
+require(vegan)
+require(lme4)
+require(lsmeans)
+require(rstatix)
+
+require(ggplot2)
+require(ggpubr)
+```
+
+```{r read data}
+vp_data <- read.csv("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/1_data_products/vp_pp_2023_w.csv")
+
+meta_data <- read_csv("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/2_input/1_raw_data/sf_plot_data_2023.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) 
+  
+plot_stats <- read_csv("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/1_data_products/plot_stats_2023.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge'))
+```
+
+## NMDS
+```{r NMDS, include = FALSE}
+#vp_nmds <- vp_data %>%  
+#  column_to_rownames("plot") %>% 
+#  metaMDS() %>% 
+#  scores(tidy = TRUE) %>% 
+#  filter(score == "sites") %>% 
+#  select(NMDS1, NMDS2)
+
+#spec_nmds <- vp_data %>%  
+#  column_to_rownames("plot") %>% 
+#  metaMDS() %>% 
+#  scores(tidy = TRUE) %>% 
+#  filter(score == "species") 
+
+vp_dist <- vp_data %>% 
+  select(-plot) %>%
+  vegdist()
+
+vp_nmds <- vp_dist %>% 
+  metaMDS() %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "sites") %>% 
+  select(NMDS1, NMDS2)
+  
+spec_nmds <- vp_data %>%  
+  column_to_rownames("plot") %>% 
+  metaMDS() %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "species") 
+
+meta_nmds <- cbind(meta_data, vp_nmds) %>% 
+  select(habitat:treatment, NMDS1, NMDS2)
+```
+
+```{r NMDS plot (country), echo = FALSE}
+hull_data <- meta_nmds %>% # find convex hulls
+  group_by(habitat, treatment) %>% # for each combination of country and habitat
+  arrange(NMDS1, NMDS2) %>%
+  slice(chull(NMDS1, NMDS2))
+
+ggplot() +
+  geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3) + # add the point markers 
+  geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
+  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  coord_equal() +
+  theme_classic() 
+
+#ggsave("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/3_plots/sf_NMDS_23.svg", height = 4, width = 7)
+```
+
+```{r PERMANOVA}
+vp_data %>% 
+  inner_join(meta_data, .) %>% 
+adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 9999, method = "bray")
+```
+
+
+```{r PERMANOVA 2}
+# PERMANOVA based on distance matrix (bray)
+adonis2(vp_dist ~ meta_data$treatment * meta_data$habitat)
+```
+
+```{r PERMANOVA per habitat}
+# per habitat
+# meadow
+x <- meta_data %>% 
+  filter(habitat == "meadow")
+
+vp_dist <- vp_data[which(meta_data$habitat == "meadow"),] %>% 
+  select(-plot) %>%
+  vegdist()
+
+adonis2(vp_dist ~ x$treatment)
+
+# heath
+x <- meta_data %>% 
+  filter(habitat == "heath")
+
+vp_dist <- vp_data[which(meta_data$habitat == "heath"),] %>% 
+  select(-plot) %>%
+  vegdist()
+
+adonis2(vp_dist ~ x$treatment)
+
+# ridge
+x <- meta_data %>% 
+  filter(habitat == "ridge")
+
+vp_dist <- vp_data[which(meta_data$habitat == "ridge"),] %>% 
+  select(-plot) %>%
+  vegdist()
+
+adonis2(vp_dist ~ x$treatment)
+```
+
+## Species covers
+```{r}
+covDat <- meta_data %>% 
+  cbind(vp_data1)
+covDat$site <- as.factor(covDat$site)
+VAS.cov.change <- data.frame(species = rep(NA, times = ncol(vp_data1)), c.change = rep(NA, times = ncol(vp_data1)), SE = rep(NA, times = ncol(vp_data1)), p.val = rep(NA, times = ncol(vp_data1)))
+vp_data1 <- vp_data %>% 
+  column_to_rownames("plot") 
+
+
+for (i in 22:ncol(vp_data1)){
+  specname <- variable.names(vp_data1)[i]
+  fit <- glmer(covDat[, 4 + i] ~ treatment + (habitat | site), family = poisson, data = covDat)
+  VAS.cov.change[i, 1] <- specname
+  VAS.cov.change[i, 2] <- try(summary(fit)$coefficients[2])
+  VAS.cov.change[i, 3] <- try(summary(fit)$coefficients[4])
+  VAS.cov.change[i, 4] <- try(summary(fit)$coefficients[8])
+  #ggplot(covDat, aes(year, covDat[, 7 + i])) + geom_point()
+  rm(list = ls(pattern = specname))
+  rm(specname, i)
+}
+
+fit <- glmer(covDat$Carcap ~ treatment + (habitat | site), family = poisson, data = covDat)
+summary(fit)$coefficients[8]
+
+write_csv(VAS.cov.change, "~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/2_results/species_cover_dif_2023.csv")
+```
+
+# functional type cover difference
+```{r }
+plot_stats %>% 
+  pivot_longer(F:S, names_to = "type", values_to = "hits") %>% 
+  ggplot(aes(x = type, y = hits, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ habitat) +
+  theme(legend.position = c(.85, .8))
+
+#ggsave("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/3_plots/sf_type_cover_23.svg", height = 4, width = 7)
+```
+
+
+```{r}
+# shrubs
+fit <- plot_stats %>% 
+  pivot_longer(F:S, names_to = "type", values_to = "hits") %>% 
+  filter(type == "S") %>% 
+  glmer(hits ~ habitat / treatment + (habitat | number), family = poisson, data = .)
+summary(fit)
+anova(fit)
+
+x <- as_tibble(lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts) %>% 
+  mutate(type = "S") %>% 
+  select(type, everything())
+
+# forbs
+fit <- plot_stats %>% 
+  pivot_longer(F:S, names_to = "type", values_to = "hits") %>% 
+  filter(type == "F") %>% 
+  glmer(hits ~ habitat / treatment + (habitat | number), family = poisson, data = .)
+summary(fit)
+anova(fit)
+
+x <- as_tibble(lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts) %>% 
+  mutate(type = "F") %>% 
+  select(type, everything()) %>% 
+  rbind(x)
+
+# graminoids
+fit <- plot_stats %>% 
+  pivot_longer(F:S, names_to = "type", values_to = "hits") %>% 
+  filter(type == "G") %>% 
+  glmer(hits ~ habitat / treatment + (habitat | number), family = poisson, data = .)
+summary(fit)
+anova(fit)
+
+x <- as_tibble(lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts) %>% 
+  mutate(type = "G") %>% 
+  select(type, everything()) %>% 
+  rbind(x)
+
+#write_csv(x, "~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/2_results/type_cover_dif_2023.csv")
+```
+
+```{r }
+vp_data %>% 
+  full_join(meta_data) %>% 
+  pivot_longer(Andpol:Vasplaunk, names_to = "species", values_to = "hits") %>% 
+  filter(species == "Carbig") %>% 
+  ggplot(aes(x = treatment, y = hits, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ habitat) +
+  theme(legend.position = "none") +
+  labs(title = "Vaccinium uliginosum")
+
+ggsave("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/3_plots/vaculi_hits_23.svg", height = 3, width = 4)
+```

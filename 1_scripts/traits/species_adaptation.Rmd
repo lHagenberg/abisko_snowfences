@@ -1,0 +1,198 @@
+---
+title: "species_adaptation"
+author: "Liyenne"
+date: "2025-10-22"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+# data handling
+require(tidyverse)
+require(broom)
+require(purrr)
+
+# visualization
+require(ggplot2)
+
+# modelling
+require(lme4)
+require(lmerTest)
+require(glmmTMB)
+require(pscl)
+
+# model coefficients
+require(emmeans)
+require(MuMIn)
+
+# model diagnostics
+require(DHARMa)
+require(easystats)
+require(fitdistrplus)
+```
+
+# Data import
+```{r data import}
+# trait data
+traits <- read_csv("2_data/2_clean_data/trait_data_w.csv") %>%
+  mutate(across(code:group, as.factor))
+
+traits_l <- read_csv("2_data/2_clean_data/trait_data_l.csv")%>%
+  mutate(across(code:group, as.factor))
+
+traits_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>%
+  mutate(across(ID:group, as.factor))
+
+
+traits_pooled_l <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv") %>%
+  mutate(across(ID:group, as.factor))
+```
+
+```{r}
+# taxonomic information
+species_list <- read_csv("../snowfence_community/2_data/1_raw_data/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r}
+# community composition data (l)
+community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_leaf_2025_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, family:group, hits)
+```
+
+```{r}
+# biomass model outputs
+biomass_models <- read_csv("3_output/Results/biomass_pinpoint_models.csv")
+```
+
+# Analysis
+```{r}
+# exclude species with insufficient data
+model_sp_traits <- traits_pooled_l %>% 
+  group_by(spec, trait) %>% 
+  filter(n_distinct(treatment) >= 2 & n_distinct(habitat) >= 2)  
+
+species <- unique(model_sp_traits$spec)
+traits <- unique(model_sp_traits$trait)
+spec_trait_grid <- expand_grid(spec = species, trait = traits) %>% 
+  mutate(spec = as.character(spec)) %>% 
+  as.data.frame()
+model_list <- list()
+i <- 1
+```
+
+## species response to treatment
+
+How does individual species response differ between treatments? what is the direction of this response and what is it related to? 
+```{r plant height plot, echo = FALSE}
+traits_pooled %>% 
+  ggplot(aes(x = habitat, y = height, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/plant_height.svg", height = 4, width = 25)
+```
+
+### plant height
+```{r seedling count distribution, echo = FALSE}
+d <- traits_pooled_l %>% 
+  filter(spec == "Betnan" & trait == "height") 
+dist <- fitdist(d$trait_value, "norm")
+plot(dist)
+```
+
+```{r}
+# lmm (produces singular warning!)
+fit1 <- lmer(trait_value ~ treatment + (1 |habitat), data = filter(traits_pooled_l, spec == "Andpol" & trait == "height"))
+
+summary(fit1)
+car::Anova(fit1, type = "II")
+
+x <- emmeans(fit1, pairwise ~ treatment) %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r}
+# model with covariate adjustment
+fit2 <- lm(trait_value ~ habitat * treatment, data = filter(traits_pooled_l, spec == "Andpol" & trait == "height"))
+
+summary(fit2)
+car::Anova(fit2, type = "II") %>% 
+  tidy() %>% 
+  dplyr::select(term, p.value) %>% 
+  pivot_wider(names_from = term, values_from = p.value) %>% 
+  dplyr::select(!Residuals)
+
+glance(fit2)
+
+AIC(fit1, fit2)
+```
+
+
+#### model loop
+```{r}
+for(i in 1:nrow(spec_trait_grid)) {
+  key <- paste(spec_trait_grid[i, "spec"], spec_trait_grid[i, "trait"], sep = "_")
+  model_data <- traits_pooled_l %>% 
+    filter(spec == spec_trait_grid[i, "spec"] & 
+             trait == spec_trait_grid[i, "trait"])
+  model_list[[key]] <- lm(trait_value ~ treatment * habitat, data = model_data)
+  rm(model_data, key)
+}
+
+# View a specific model
+summary(model_list[["Andpol_height"]])
+
+# extract model coefficients
+get_model_pars <- function(sptr, model_list) {
+  model <- model_list[[sptr]]
+  
+  # Get coefficients (estimate, std.error, p.value)
+  p.vals <- car::Anova(model, type = "II") %>% 
+  tidy() %>% 
+  dplyr::select(term, p.value) %>% 
+  pivot_wider(names_from = term, values_from = p.value) %>% 
+  dplyr::select(!Residuals)
+  
+  # Get R-squared
+  model_pars <- glance(model) %>% 
+    dplyr::select(r.squared:p.value) 
+  
+  # Combine with species name
+  bind_cols(spec = sptr, model_pars, p.vals)
+}
+
+results <- map(names(model_list), safely(get_model_pars), model_list = model_list)
+results_list <- map(results, "result")
+results_df <- results_list[!map_lgl(results_list, is.null)] %>%
+  list_rbind()
+
+results_df <- results_df %>% 
+  mutate(sig = ifelse(p.value < 0.05, "*", "ns"))
+```
+

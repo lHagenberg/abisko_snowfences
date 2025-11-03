@@ -1,0 +1,457 @@
+---
+title: "SF_biomass"
+author: "Liyenne"
+date: "2025-10-13"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+## packages
+```{r}
+require(broom)
+require(purrr)
+require(tidyverse)
+require(openxlsx)
+
+require(conflicted)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+```
+## functions
+```{r}
+extr_3 <- function(string) {
+  # Split the string into words
+  words <- strsplit(string, " ")[[1]]
+  # Extract the first three letters from each word
+  first_three_letters <- sapply(words, substr, 1, 3)
+  # Return the first three letters of each word
+  first_three_letters <- paste(first_three_letters, collapse = "")
+  return(first_three_letters)
+}
+```
+
+```{r}
+# import biomass subplot pinpoint data
+biomass_pinpoint <- read.csv("2_data/1_raw/biomass/SF_biomass_pinpoint_2025.csv") %>% 
+  slice(1:(n() - 3)) %>% 
+  mutate(across(everything(), ~replace_na(., 0))) %>% 
+  pivot_longer(cols = D1SF:X5C, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, part, hits)
+```
+
+```{r}
+spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
+```
+
+
+# Data import
+```{r}
+biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>% 
+  mutate(dweight = as.numeric(dweight)) %>% 
+  select(!comment)
+```
+
+# data_cleaning
+```{r}
+emp_biomass <- biomass %>% 
+  filter(species == "Empetrum nigrum") %>%
+  mutate(species_part = paste(species, part, sep = "_")) %>% 
+  select(plot, species_part, species, part, dweight)
+
+emp_biomass_wide <- emp_biomass %>% 
+  select(plot, species_part, dweight) %>% 
+  pivot_wider(names_from = species_part, values_from = dweight)
+
+# calculate empetrum stem and leaf based on unsorted weight
+emp_leaf_biomass <- emp_biomass_wide %>%
+  mutate(
+    total = `Empetrum nigrum_stem` + `Empetrum nigrum_leaf`,
+    `Empetrum nigrum_stem` = `Empetrum nigrum_stem` + (`Empetrum nigrum_stem` / total) * `Empetrum nigrum_unsorted`,
+    `Empetrum nigrum_leaf` = `Empetrum nigrum_leaf` + (`Empetrum nigrum_leaf` / total) * `Empetrum nigrum_unsorted`
+  ) %>%
+  select(-total) %>% 
+  na.omit %>% 
+  pivot_longer(!plot, names_to = "species_part",  values_to = "dweight") %>%
+  separate(species_part, into = c("species", "part"), sep = "_")
+
+biomass_clean <- biomass %>% 
+  rows_update(emp_leaf_biomass, by = c("plot", "species", "part")) %>% 
+  filter(part != "unsorted")
+
+biomass_clean$spec <- NA
+
+for (i in 1:nrow(biomass_clean)) {
+  extr <- extr_3(as.data.frame(biomass_clean)[i, 2]) 
+  biomass_clean[i, 5] <- extr
+  rm(extr)
+}
+
+leaf_biomass <- biomass_clean %>% 
+  select(plot, spec, part, dweight) %>% 
+  filter(part == "leaf")
+
+stem_biomass <- biomass_clean %>% 
+  select(plot, spec, part, dweight) %>% 
+  filter(part == "stem")
+```
+
+```{r}
+# get shortened species names
+biomass_pinpoint$spec <- NA
+
+for (i in 1:nrow(biomass_pinpoint)) {
+  extr <- extr_3(as.data.frame(biomass_pinpoint)[i, 2]) 
+  biomass_pinpoint[i, 5] <- extr
+  rm(extr)
+}
+
+leaf_biomass_pinpoint <- biomass_pinpoint %>% 
+  select(plot, spec, part, hits) %>% 
+  filter(hits > 0, 
+         part == "leaf")
+
+stem_biomass_pinpoint <- biomass_pinpoint %>% 
+  select(plot, spec, part, hits) %>% 
+  filter(hits > 0, 
+         part == "stem")
+```
+
+```{r}
+# merge biomass subplot pinpoint and biomass data
+leaf_biomass_pinpoint <- leaf_biomass_pinpoint %>% 
+  full_join(leaf_biomass, by = c("plot", "spec", "part")) %>% 
+  mutate(hits_noNA = replace_na(hits, 1)) 
+
+stem_biomass_pinpoint <- stem_biomass_pinpoint %>% 
+  full_join(stem_biomass, by = c("plot", "spec", "part")) %>% 
+  mutate(hits_noNA = replace_na(hits, 1)) 
+
+biomass_pinpoint %>% 
+  head(10)
+```
+
+```{r}
+# plotting leaf biomass vs pinpoint
+leaf_biomass_pinpoint %>% 
+  filter(spec == "Andpol") %>% 
+  ggplot(aes(x = hits_noNA, y = dweight)) + 
+  geom_point()
+
+species <- unique(leaf_biomass_pinpoint$spec)
+plot_list <- list()
+
+for(sp in species) {
+  plot_list[[sp]] <- leaf_biomass_pinpoint %>%
+    filter(spec == sp) %>%
+    ggplot(aes(x = hits_noNA, y = dweight)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    ggtitle(sp)
+}
+
+patchwork::wrap_plots(plot_list, ncol = 5) 
+
+ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height =  30)
+```
+
+```{r}
+# plotting leaf biomass vs pinpoint
+stem_biomass_pinpoint %>% 
+  filter(spec == "Andpol") %>% 
+  ggplot(aes(x = hits_noNA, y = dweight)) + 
+  geom_point()
+
+species <- unique(stem_biomass_pinpoint$spec)
+plot_list <- list()
+
+for(sp in species) {
+  plot_list[[sp]] <- stem_biomass_pinpoint %>%
+    filter(spec == sp) %>%
+    ggplot(aes(x = hits_noNA, y = dweight)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    ggtitle(sp)
+}
+
+patchwork::wrap_plots(plot_list, ncol = 5) 
+
+ggsave("3_output/1_figures/biomass/species_stem_biomass.tif", width = 30, height =  30)
+```
+
+# biomass modelling
+## leaf biomass
+```{r}
+# exclude species with insufficient data
+model_bio_pp <- leaf_biomass_pinpoint %>% 
+  group_by(spec) %>% 
+  filter(sum(!is.na(hits)) & sum(!is.na(dweight)) >= 2) 
+
+species <- unique(model_bio_pp$spec)
+model_list <- list()
+
+for(sp in species) {
+  model_list[[sp]] <- lm(dweight ~ hits, 
+                         data = filter(model_bio_pp, spec == sp))
+}
+
+# View a specific model
+summary(model_list[["Andpol"]])
+
+leaf_results <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+  # Get coefficients (estimate, std.error, p.value)
+  coef_data <- tidy(model) %>%
+    filter(term == "hits") %>%  # Get only the slope for hits
+    select(estimate, std.error, p.value)
+  
+  # Get R-squared
+  r2 <- glance(model) %>%
+    select(r.squared)
+  
+  # Combine with species name
+  bind_cols(spec = sp, coef_data, r2)
+})
+
+leaf_results <- leaf_results %>% 
+  mutate(sig = ifelse(p.value < 0.05, "*", "ns")) %>% 
+  mutate(part = "leaf")
+```
+
+## stem biomass
+```{r}
+# exclude species with insufficient data
+model_bio_pp <- stem_biomass_pinpoint %>% 
+  group_by(spec) %>% 
+  filter(sum(!is.na(hits)) & sum(!is.na(dweight)) >= 2) 
+
+species <- unique(model_bio_pp$spec)
+model_list <- list()
+
+for(sp in species) {
+  model_list[[sp]] <- lm(dweight ~ hits, 
+                         data = filter(model_bio_pp, spec == sp))
+}
+
+# View a specific model
+summary(model_list[["Andpol"]])
+
+stem_results <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+  # Get coefficients (estimate, std.error, p.value)
+  coef_data <- tidy(model) %>%
+    filter(term == "hits") %>%  # Get only the slope for hits
+    select(estimate, std.error, p.value)
+  
+  # Get R-squared
+  r2 <- glance(model) %>%
+    select(r.squared)
+  
+  # Combine with species name
+  bind_cols(spec = sp, coef_data, r2)
+})
+
+stem_results <- stem_results %>% 
+  mutate(sig = ifelse(p.value < 0.05, "*", "ns")) %>% 
+  mutate(part = "stem")
+```
+
+```{r}
+biomass_models <- bind_rows(leaf_results, stem_results) %>% 
+  select(spec, part, everything())
+
+
+write_csv(biomass_models, "3_output/2_statistics/biomass/biomass_models.csv")
+```
+
+
+# total biomass
+```{r}
+full_pinpoint <- read.csv("2_data/2_clean/pinpoint/vp_pp_2025_l.csv")
+```
+
+```{r}
+# combine biomass data with pinpoint data
+community_biomass <- full_pinpoint %>% 
+  left_join(biomass_models) %>% 
+  dplyr::select(plot:estimate, sig) %>% 
+  mutate(biomass = hits * estimate) %>% 
+  #drop_na(biomass) %>% 
+  select(!estimate:sig)
+
+community_biomass <- community_biomass %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2)))  # create site variable from plot code
+
+community_biomass <- community_biomass %>% 
+  left_join(spec_list) %>% 
+  select(plot, habitat:site, spec, species, family:group, part, hits, biomass)
+```
+
+```{r}
+community_biomass %>% 
+  write_csv("2_data/2_clean/sf_community.csv")
+```
+
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- leaf_results %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+full_pinpoint %>% 
+  filter(part == "leaf") %>% 
+  pull(hits) %>% 
+  sum()
+
+full_pinpoint %>% 
+  filter(spec %in% sig_spec) %>%
+  filter(part == "leaf") %>% 
+  pull(hits) %>% 
+  sum()
+```
+
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- stem_results %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+full_pinpoint %>% 
+  filter(part == "stem") %>% 
+  pull(hits) %>% 
+  sum()
+
+full_pinpoint %>% 
+  filter(spec %in% sig_spec) %>%
+  filter(part == "stem") %>% 
+  pull(hits) %>% 
+  sum()
+```
+
+```{r}
+# total biomass per plot
+totals <- community_biomass %>% 
+  drop_na(biomass) %>%
+  group_by(plot) %>% 
+  summarise(total_bm = sum(biomass), total_hits = sum(hits)) %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2)))  # create site variable from plot code
+
+totals %>% 
+  ggplot(aes(x = habitat, y = total_bm, fill = treatment)) + 
+  geom_boxplot(outliers = FALSE) + 
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0, dodge.width = 0.75)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  theme_classic() +
+  labs(x = "Habitat", y = "Total biomass (g)") +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+```
+
+```{r}
+# total biomass per plot
+totals <- community_biomass %>%
+  drop_na(biomass) %>%
+  group_by(plot, group) %>% 
+  summarise(total_bm = sum(biomass), total_hits = sum(hits)) %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2)))  # create site variable from plot code
+
+totals %>% 
+  ggplot(aes(x = group, y = total_bm, fill = treatment)) + 
+  geom_boxplot(outliers = FALSE) + 
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0, dodge.width = 0.75)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  facet_wrap(~ habitat, scales = "free", ncol = 4, nrow = 2) + 
+  labs(x = "Functional type", y = "Total biomass (g)") +
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/biomass/sf_total_biomass_25.tif", height = 4, width = 4.5)
+```
+
+```{r}
+# total leaf biomass per plot
+totals <- community_biomass %>% 
+  drop_na(biomass) %>%
+  group_by(plot, group) %>% 
+  filter(part == "leaf") %>% 
+  summarise(total_bm = sum(biomass), total_hits = sum(hits)) %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2)))  # create site variable from plot code
+
+totals %>% 
+  ggplot(aes(x = group, y = total_bm, fill = treatment)) + 
+  geom_boxplot(outliers = FALSE) + 
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0, dodge.width = 0.75)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  facet_wrap(~ habitat, scales = "free", ncol = 4, nrow = 2) + 
+  labs(x = "Functional type", y = "Total leaf biomass (g)") +
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/biomass/sf_leaf_biomass_25.tif", height = 4, width = 4.5)
+```
+
+ # PCA of biomass and traits
+```{r}
+
+```
+

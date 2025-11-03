@@ -1,0 +1,590 @@
+---
+title: "sf_traits_analysis"
+author: "Liyenne"
+date: "2023-11-09"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+# setup
+```{r packages}
+require(readr)
+require(tidyverse)
+
+require(vegan)
+require(lme4)
+require(lsmeans)
+require(traitstrap)
+
+require(ggplot2)
+require(ggpubr)
+require(ggridges)
+require(GGally)
+
+require(ggplot2)
+require(ggrepel)
+require(ggtext)
+require(ggpubr)
+require(ggordiplots)
+require(ggvegan)
+require(ggsignif)
+```
+
+# Data import
+```{r}
+# taxonomic information
+species_list <- read_csv("2_data/1_raw_data/community_composition/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r data import}
+# trait data
+trait_data_raw <- read_csv("2_data/1_raw_data/snowfence_traits/sf_plant_trait_data_full_v1.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'fen',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  mutate(treatment = case_when(treatment == 'C' ~ 'control',
+                           treatment == 'SF' ~ 'snowfence')) %>% 
+  left_join(species_list, by = "spec") %>% # add taxonomic data
+  select(code:spec, species:group, everything())
+```
+
+```{r}
+# community composition data (long)
+community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_leaf_2025_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, family:group, hits)
+```
+
+```{r}
+leaf_chem <- read_csv("2_data/1_raw_data/snowfence_traits/sf_leaf_chem.csv") %>%
+  mutate(across(1:3, as.factor))
+```
+
+
+# Wrangling
+## trait data (full)
+```{r LDMC caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(LDMC = dweight / fweight) %>% 
+  select(code:leafa, LDMC); head(trait_data, 10)
+```
+
+```{r SLA caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(SLA = leafa / dweight) %>% 
+  full_join(trait_data) %>% 
+  select(code:dweight, leafa, LDMC, SLA); head(trait_data, 10)
+```
+
+```{r}
+trait_data <- trait_data %>% 
+  mutate(across(1:10, as.factor)) # convert catergorical variables to factor
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_long <- trait_data %>% 
+  pivot_longer(!code:group, names_to = "trait", values_to = "trait_value") 
+```
+
+## trait data (pooled) 
+```{r}
+trait_data_pooled <- trait_data %>%  # pool data by plot and species
+  group_by(plot, spec) %>% 
+  summarise(height = mean(height),
+            dweight = mean(dweight), 
+            fweight = mean(fweight),
+            leafa = mean(leafa), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA)) 
+
+trait_data_pooled <- trait_data %>% # add taxonomic variables to pooled dataset
+  select(2:10) %>% 
+  right_join(trait_data_pooled, by = c("plot", "spec")) %>% 
+  distinct()
+```
+
+### add leaf chem comp
+```{r}
+trait_data_pooled <- trait_data_pooled %>% 
+  left_join(leaf_chem, by = c("plot", "spec")) %>% # combined data has 3 extra rows??? 
+  select(ID, everything()) %>% 
+  mutate(across(c(wN:CN_ratio), as.numeric))
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_pooled_long <- trait_data_pooled %>% 
+  pivot_longer(!ID:group, names_to = "trait", values_to = "trait_value") %>% 
+  filter(!is.na(ID))
+```
+
+## analytics
+```{r}
+# in how many plots did each species occur? 
+x <- trait_data_raw %>% 
+  group_by(spec) %>% 
+  summarise(unique_plot_count = n_distinct(plot)) %>% 
+  arrange(desc(unique_plot_count)); print(x)
+
+# how many species occurred in 10 or more plots
+x %>% 
+  filter(unique_plot_count >= 10) %>% 
+  nrow() # 12
+
+# how many pooled samples does that constitute?
+x %>% 
+  filter(unique_plot_count >= 10) %>% 
+  summarise(n_pools = sum(unique_plot_count))
+```
+
+# Bootstrapping traits
+## trait fill 
+### no chem
+```{r}
+filled_traits <- trait_fill(
+comm = community_data, traits = trait_data_long,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "code"
+)
+autoplot(filled_traits)
+```
+
+```{r}
+trait_missing(filled_trait = filled_traits, comm = community_data)
+```
+
+```{r}
+boot_traits <- trait_np_bootstrap(filled_traits = filled_traits, nrep = 10, sample_size = 100)
+```
+
+### with chem
+```{r}
+filled_traits_pooled <- trait_fill(
+comm = community_data, traits = trait_data_pooled_long,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_pooled)
+```
+
+```{r}
+trait_missing(filled_trait = filled_traits_pooled, comm = community_data)
+```
+
+```{r}
+boot_traits_pooled <- trait_np_bootstrap(filled_traits = filled_traits_pooled, nrep = 10, sample_size = 100)
+```
+
+# Data exploration
+```{r}
+trait_data_raw %>% 
+  ggplot(aes(x = fweight, y = dweight, color = treatment)) +
+  geom_point() +
+  theme_classic() 
+```
+
+
+
+## density plots (unweighted)
+```{r}
+# density plots for plant height
+trait_data %>% 
+  ggplot(aes(x = height, y = habitat, fill = habitat)) +
+  geom_density_ridges()
+
+trait_data %>% 
+  ggplot(aes(x = height, y = treatment, fill = treatment)) +
+  geom_density_ridges()
+```
+
+```{r}
+# density plots for LDMC
+trait_data %>% 
+  ggplot(aes(x = LDMC, y = habitat, fill = habitat)) +
+  geom_density_ridges()
+
+trait_data %>% 
+  ggplot(aes(x = LDMC, y = treatment, fill = treatment)) +
+  geom_density_ridges()
+```
+
+```{r}
+# density plots for SLA
+trait_data %>% 
+  ggplot(aes(x = SLA, y = habitat, fill = habitat)) +
+  geom_density_ridges()
+
+trait_data %>% 
+  ggplot(aes(x = SLA, y = treatment, fill = treatment)) +
+  geom_density_ridges()
+```
+
+## per species
+How does individual species response differ between treatments? what is the direction of this response and what is it related to? 
+```{r plant height plot, echo = FALSE}
+trait_data %>% 
+  ggplot(aes(x = habitat, y = height, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/plant_height.svg", height = 4, width = 25)
+```
+
+```{r LDMC per species, echo = FALSE}
+trait_data %>% 
+  ggplot(aes(x = habitat, y = LDMC, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/LDMC.svg", height = 4, width = 25)
+```
+
+```{r SLA per species plot, echo = FALSE}
+trait_data %>% 
+  ggplot(aes(x = habitat, y = SLA, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/SLA.svg", height = 4, width = 25)
+```
+
+```{r}
+trait_data_pooled %>% 
+  ggplot(aes(x = habitat, y = CN_ratio, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/CN_ratio.svg", height = 4, width = 25)
+```
+
+
+```{r}
+filled_traits_pooled %>% 
+  filter(trait == "height") %>% 
+  ggplot(aes(x = habitat, y = trait_value, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ spec_comm) +
+  theme(legend.position = c(.85, .8), 
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/height_filled.svg", height = 4, width = 25)
+```
+
+
+## community weighted averages
+are shifts in community averages driven by species adaptation or species composition differences?
+### no chem
+```{r}
+boot_traits %>% 
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  facet_wrap(~ trait, scales = "free") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("../3_output/Figures/bootstrapped_traits.svg", height = 7, width = 7)
+```
+
+### with chem
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "CN_ratio", "d13C", "d15N")
+boot_traits_pooled <- boot_traits_pooled %>% mutate(habitat = recode(habitat,
+                             "meadow" = "fen"))
+
+boot_traits_pooled %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 2, nrow = 3,
+             labeller = labeller(trait = trait_labs)) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/bootstrapped_traits_pooled_2025.svg", height = 7, width = 3)
+```
+
+## strategies
+```{r}
+trait_data %>% 
+  ggplot(aes(x = SLA, y = LDMC, colour = group)) +
+  geom_point()
+```
+
+## local vs global
+
+## PCA 
+```{r}
+trait_data_pooled %>% 
+  #select(species, height:CN_ratio) %>% 
+  na.omit() %>% 
+  ggpairs(columns = 11:21, 
+          mapping = aes(color = habitat))
+
+ggsave("../3_output/Figures/variables.svg")
+```
+
+### species traits
+```{r}
+species_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) %>% 
+  column_to_rownames(var = "species")
+
+
+```
+
+```{r}
+species_pca <- species_traits %>% 
+  scale() %>% 
+  rda()
+
+summary(species_pca)
+
+species_scores <- as.data.frame(species_pca$CA$u[, 1:2])
+species_scores$species <- as.factor(rownames(species_scores))
+trait_scores <- as.data.frame(species_pca$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+species_scores <- species_scores %>% 
+  left_join(species_list)
+
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = species_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
+  geom_text_repel(data = species_scores, aes(x = PC1, y = PC2, label = species, color = group), size = 4,  alpha = 0.7) +  # add the species labels
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (50%)", y = "PC2 (17%)", color = "Functional group") 
+  
+
+ggsave("../3_output/Figures/species_pca.svg", height = 5, width = 6)
+```
+
+### trait observations
+```{r}
+pca_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  column_to_rownames(var = "ID") %>% 
+  select(10, 14:20) %>% 
+  scale() %>% 
+  rda()
+
+summary(pca_traits)
+
+site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
+site_scores$ID <- as.factor(rownames(site_scores))
+trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+site_scores <- trait_data_pooled %>%
+  select(ID:group) %>% 
+  right_join(site_scores)
+
+site_scores[, 11:12] <- site_scores[, 11:12] * 2.5
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = site_scores, aes(x = PC1, y = PC2, color = treatment), size = 3, alpha = 0.70) + # add the point markers
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (49%)", y = "PC2 (15%)") 
+```
+
+# Analysis
+```{r}
+# Betula nana
+fit <- trait_data %>% 
+  filter(species == "Betnan") %>% 
+  lmer(height ~ habitat / treatment + (1 | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Empetrum nigrum
+fit <- trait_data %>% 
+  filter(species == "Empnig") %>% 
+  lmer(height ~ habitat / treatment + (1 | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Vaccinium uliginosum
+fit <- trait_data %>% 
+  filter(species == "Vaculi") %>% 
+  lmer(height ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+```
+
+## Leaf Dry Matter Content (LDMC)
+
+```{r LDMC plot, echo = FALSE}
+trait_data %>% 
+  ggplot(aes(x = habitat, y = LDMC, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ species) +
+  theme(legend.position = c(.85, .8))
+
+#ggsave("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/3_plots/LDMC_23.svg", height = 4, width = 7)
+```
+
+```{r}
+# Betula nana
+fit <- trait_data %>% 
+  filter(species == "Betnan") %>% 
+  lmer(LDMC ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Empetrum nigrum
+fit <- trait_data %>% 
+  filter(species == "Empnig") %>% 
+  lmer(LDMC ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Vaccinium uliginosum
+fit <- trait_data %>% 
+  filter(species == "Vaculi") %>% 
+  lmer(LDMC ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+```
+
+##Specific Leaf Area (SLA)
+
+```{r SLA plot, echo = FALSE}
+trait_data %>% 
+  ggplot(aes(x = habitat, y = SLA, color = treatment)) +
+  geom_boxplot() +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  theme_classic() +
+  facet_grid(~ species) 
+
+ggsave("~/Project Green Arctic/3_snow_fences/1_data/1_sf_data_analysis/3_output/3_plots/SLA_23.svg", height = 4, width = 7)
+```
+
+```{r}
+# Betula nana
+fit <- trait_data %>% 
+  filter(species == "Betnan") %>% 
+  lmer(SLA ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Empetrum nigrum
+fit <- trait_data %>% 
+  filter(species == "Empnig") %>% 
+  lmer(SLA ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+
+# Vaccinium uliginosum
+fit <- trait_data %>% 
+  filter(species == "Vaculi") %>% 
+  lmer(SLA ~ habitat / treatment + (habitat | site), data = .)
+
+summary(fit)
+anova(fit)
+lsmeans(fit, pairwise ~ habitat / treatment, lmer.df = "Satterthwaite", adjust = "tukey")$contrasts
+```

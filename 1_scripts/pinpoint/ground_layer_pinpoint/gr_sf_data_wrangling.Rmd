@@ -1,0 +1,163 @@
+---
+title: "ground_pp_data_wrangling"
+author: "Liyenne"
+date: "2023-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+```{r include = FALSE} 
+require(tidyr)
+require(dplyr)
+```
+
+```{r echo = FALSE}
+# ground pinpoint data
+gr_pp <- readr::read_csv("../../2_input/1_raw_data/sf_gr_pp_data_2023_v1.csv")
+
+# vascular plant pinpoint data (flux plot)
+gr_pp_flux <- readr::read_csv("../../2_input/1_raw_data/sf_flux_gr_pp_data_2023_v1.csv")
+
+# vascular plant species list
+gr_sp_list <- readr::read_csv("../../2_input/1_raw_data/sf_gr_species_list.csv")
+
+# plot data
+plot_data <- readr::read_csv("../../2_input/1_raw_data/sf_plot_data_2023.csv")
+```
+
+# create acronyms for each species
+```{r}
+gr_sp_list$spec <- NA
+
+gr_sp_list <- gr_sp_list %>% 
+  select(spec, everything())
+
+for (i in 1:nrow(gr_sp_list)) {
+  # Input string
+spec <- as.character(gr_sp_list[i, 2])
+
+# Split the string into words
+words <- unlist(strsplit(spec, " "))
+
+# Extract the first three letters from each word
+first_three_letters <- sapply(words, function(word) substr(word, 1, 3))
+
+# Combine the extracted letters into a new string
+sp_acronym <- paste(first_three_letters, collapse = "")
+
+# Print the result
+gr_sp_list[i, 1] <- sp_acronym
+
+rm(spec, words, first_three_letters, sp_acronym)
+}
+
+gr_sp_list %>% 
+  head(10)
+```
+
+# Transpose data
+**large plot**
+```{r}
+gr_pp_l <- gr_pp %>%
+  pivot_longer(!species, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, hits) %>% 
+  replace_na(list(hits = 0))
+
+gr_pp_l %>% 
+  head(10)
+```
+
+**flux plot**
+```{r}
+gr_pp_flux_l <- gr_pp_flux %>%
+  pivot_longer(!species, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, hits) %>% 
+  replace_na(list(hits = 0))
+
+gr_pp_flux_l %>% 
+  head(10)
+```
+
+# Merge data
+Data collected in small sub plots (40 x 50 cm, 30 pins) were kept separately be related to flux measurements. Data of these flux plots will be merged with the large plots. 
+```{r}
+gr_pp_l <- full_join(gr_pp_l, gr_pp_flux_l, by = c("species", "plot")) %>% 
+  replace_na(list(hits.x = 0, hits.y = 0))
+
+gr_pp_l <- gr_pp_l %>% 
+  mutate(hits = hits.x + hits.y) %>% 
+  select(plot, species, hits) 
+
+extr_3 <- function(string) {
+  # Split the string into words
+  words <- strsplit(string, " ")[[1]]
+  # Extract the first three letters from each word
+  first_three_letters <- sapply(words, substr, 1, 3)
+  # Return the first three letters of each word
+  first_three_letters <- paste(first_three_letters, collapse = "")
+  return(first_three_letters)
+}
+
+# get shortened species names
+gr_pp_l$spec <- NA
+
+for (i in 1:nrow(gr_pp_l)) {
+  extr <- extr_3(as.data.frame(gr_pp_l)[i, 2]) 
+  gr_pp_l[i, 4] <- extr
+  rm(extr)
+}
+
+gr_pp_l <- gr_pp_l %>% 
+  select(plot, spec, hits) 
+
+gr_pp_l %>% 
+  head(10)
+```
+
+```{r include=FALSE}
+gr_pp_l %>%
+  readr::write_csv('../../3_output/1_data_products/gr_pp_2023_l.csv')
+```
+
+```{r}
+gr_pp_w <- gr_pp_l %>% 
+    pivot_wider(names_from = spec, values_from = hits)
+
+gr_pp_w %>% 
+  head(10)
+```
+
+```{r include=FALSE}
+gr_pp_w %>%
+  readr::write_csv('../../3_output/1_data_products/gr_pp_2023_w.csv')
+```
+
+# Get plot level statistics
+```{r}
+plot_stats <- plot_data %>% 
+  select(plot, habitat, site, treatment) 
+  
+plot_stats <- gr_sp_list %>%
+  select(spec, group) %>% 
+  left_join(gr_pp_l, ., by = "spec") %>% 
+  group_by(plot, group) %>% 
+  summarise(type_hits = sum(hits)) %>%
+  pivot_wider(names_from = group, values_from = type_hits) %>%
+  left_join(plot_stats, ., by = "plot") %>% 
+  select(-last_col())
+
+plot_stats %>% 
+  head(10)
+
+x <- read.csv("../../3_output/1_data_products/plot_stats_veg_2023.csv")
+
+plot_stats <- inner_join(plot_stats, x)
+
+plot_stats %>%
+  readr::write_csv('../../3_output/1_data_products/plot_stats_full_2023.csv')
+```
+

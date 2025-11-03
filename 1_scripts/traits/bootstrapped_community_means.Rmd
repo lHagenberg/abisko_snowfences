@@ -1,0 +1,414 @@
+---
+title: "bootstrapped_community_means"
+author: "Liyenne"
+date: "2025-05-23"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
+# data handling
+require(tidyverse)
+
+# analysis
+require(traitstrap)
+require(emmeans)
+require(fitdistrplus)
+
+# visualization
+require(ggplot2)
+
+require(openxlsx)
+
+require(conflicted)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+```
+
+# Data import
+```{r data import}
+# trait data
+traits_no_chem <- read_csv("2_data/2_clean/traits/traits_no_chem_w.csv") %>%
+  mutate(across(code:group, as.factor))
+
+traits_no_chem_l <- read_csv("2_data/2_clean/traits/traits_no_chem_l.csv")%>%
+  mutate(across(code:group, as.factor))
+
+traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>%
+  mutate(across(ID:group, as.factor))
+
+
+traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>%
+  mutate(across(ID:group, as.factor))
+```
+
+```{r}
+# taxonomic information
+species_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r}
+# biomass model outputs
+biomass_models <- 
+  read_csv("3_output/2_statistics/biomass/biomass_models.csv") %>% 
+  filter(spec != "Rholap")
+```
+
+```{r}
+# community composition data (l)
+community <- read_csv("2_data/2_clean/sf_community.csv") %>% 
+  filter(spec != "Rholap") %>% 
+  mutate(across(plot:group, ~as.factor(.)))
+```
+
+```{r}
+# calculate biomass for community
+community_biomass <- community %>% 
+  left_join(biomass_models, by = "spec") %>% 
+  dplyr::select(plot:estimate, sig) %>% 
+  mutate(biomass = hits * estimate) %>% 
+  drop_na(biomass)#%>% 
+  #select(!estimate:sig)
+```
+
+# community weighted averages
+are shifts in community averages driven by species adaptation or species composition differences?
+## no chem
+```{r}
+comm <- community %>% 
+  filter(part == "leaf") %>% 
+  select(!c(biomass, part)) 
+
+filled_traits_no_chem <- trait_fill(
+comm = comm, traits = traits_no_chem_l,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "code"
+)
+autoplot(filled_traits_no_chem)
+
+trait_missing(filled_trait = filled_traits_no_chem, comm = community)
+
+trait_fit_distributions(filled_traits_no_chem, distribution_type = "normal")
+
+boot_traits_no_chem <- trait_np_bootstrap(filled_traits = filled_traits_no_chem, nrep = 10, sample_size = 100)
+```
+
+```{r}
+boot_traits_no_chem %>% 
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  facet_wrap(~ trait, scales = "free") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/traits/bootstrapped_traits_no_chem.tif", height = 7, width = 7)
+```
+
+## with chem
+### full community
+```{r}
+comm <- community %>% 
+  filter(part == "leaf") %>% 
+  select(!c(biomass, part)) 
+
+filled_traits <- trait_fill(
+comm = comm, traits = traits_l, # BEWARE: it matters which trait dataset you use!!! 
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits)
+
+trait_missing(filled_trait = filled_traits, comm = community)
+
+boot_traits <- trait_np_bootstrap(filled_traits = filled_traits, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+
+boot_traits %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/traits/bootstrapped_traits_2025.tif", height = 4, width = 5)
+```
+
+### spec with biomass
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- biomass_models %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+traits_l_bm <- traits_l %>% 
+  filter(spec %in% sig_spec)
+```
+
+```{r}
+comm <- community %>% 
+  filter(part == "leaf") %>% 
+  select(!c(biomass, part)) %>% 
+  filter(spec %in% sig_spec)
+
+filled_traits_bm <- trait_fill(
+comm = comm, traits = traits_l_bm,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_bm)
+
+trait_missing(filled_trait = filled_traits_bm, comm = community)
+
+boot_traits_bm <- trait_np_bootstrap(filled_traits = filled_traits_bm, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits_bm)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+
+boot_traits_bm %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/traits/bootstrapped_traits_bm_2025.tif", height = 4, width = 5)
+```
+
+# biomass weighted
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- biomass_models %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+```
+
+```{r}
+comm <- community %>% 
+  filter(part == "leaf") %>% 
+  select(!c(hits, part)) %>% 
+  drop_na(biomass)
+
+filled_traits_bm <- trait_fill(
+comm = comm, traits = traits_l,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "biomass", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_bm)
+
+trait_missing(filled_trait = filled_traits_bm, comm = community_biomass)
+
+boot_traits_bm <- trait_np_bootstrap(filled_traits = filled_traits_bm, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits_bm)
+
+write_csv(boot_traits_bm, "2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+
+boot_traits_bm %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+#ggsave("3_output/1_figures/traits/bootstrapped_traits_bmWeighted_2025.tif", height = 4, width = 5)
+```
+
+# Analysis
+## biomass weighted traits
+```{r}
+# prep bootstrapped trait dataset for analysis
+boot_traits_bm_short <- boot_traits_bm %>% 
+  dplyr::select(habitat:mean) %>% 
+  group_by(habitat, site, treatment, plot, trait) %>% 
+  mutate(bootstrap_iter = row_number()) %>% 
+  dplyr::select(bootstrap_iter, habitat:mean) %>% 
+  pivot_wider(names_from = trait, values_from = mean)
+```
+### data exploration
+```{r}
+dist <- fitdist(boot_traits_bm_short$wC, "norm")
+plot(dist)
+```
+### model test
+```{r}
+fit <- lm(height ~ treatment * habitat, data = boot_traits_bm_short)
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+glance(fit)
+
+tidy(fit)
+
+# Get EMMs for each treatment-habitat combo
+emm <- emmeans(fit, ~ treatment | habitat)
+pairs(emm, adjust = "tukey") %>%
+  as.data.frame()
+```
+
+```{r trait model diagnostics}
+simulationOutput <- simulateResiduals(fittedModel = fit)
+plot(simulationOutput)
+testDispersion(simulationOutput); rm(simulationOutput)
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+### linear models
+```{r}
+traits <- unique(boot_traits_bm$trait)
+model_list <- list()
+
+for(tr in traits) {
+  model_list[[tr]] <- lm(mean ~ treatment * habitat, 
+                         data = filter(boot_traits_bm, trait == tr))
+}
+
+anova(model_list[["SLA"]])
+
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(model_list), function(tr) {
+  model <- model_list[[tr]]
+  
+  # Get R-squared
+  mod_stats <- glance(model) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+  
+  # Combine with species name
+  bind_cols(spec = tr, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(model_list), function(tr) {
+  model <- model_list[[tr]]
+  
+  # Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(trait = tr) %>% 
+    dplyr::select(trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+# pairwise comparisons 
+pair_comps <- map_dfr(names(model_list), function(tr) {
+  model <- model_list[[tr]]
+  
+  # Get R-squared
+  emm <- emmeans(model, ~ treatment | habitat)
+  pair_comp <- pairs(emm, adjust = "tukey") %>%
+    as.data.frame() %>% 
+    mutate(trait = tr) %>% 
+    dplyr::select(trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_lm_results.xls", overwrite = TRUE)
+```
+

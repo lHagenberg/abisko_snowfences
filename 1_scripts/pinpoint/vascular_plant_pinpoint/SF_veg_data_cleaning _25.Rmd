@@ -1,0 +1,204 @@
+---
+title: "veg_data_cleaning_25"
+author: "Liyenne"
+date: "2025-09-22"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# setup
+```{r}
+require(tidyverse)
+```
+
+# data cleaning
+## pinpoint data
+```{r read data}
+vp_l <- readxl::read_excel("2_data/1_raw/community/2025/SF_pinpoint_2025.xlsx", sheet = "VP") %>% 
+  slice(1:(n() - 4)) %>% 
+  pivot_longer(-c(part, species) ,names_to = "plot", values_to = "hits") %>% 
+  mutate(hits = replace_na(hits, 0))
+
+extr_3 <- function(string) {
+  # Split the string into words
+  words <- strsplit(string, " ")[[1]]
+  # Extract the first three letters from each word
+  first_three_letters <- sapply(words, substr, 1, 3)
+  # Return the first three letters of each word
+  first_three_letters <- paste(first_three_letters, collapse = "")
+  return(first_three_letters)
+}
+
+# get shortened species names
+vp_l$spec <- NA
+
+for (i in 1:nrow(vp_l)) {
+  extr <- extr_3(as.data.frame(vp_l)[i, 1]) 
+  vp_l[i, 5] <- extr
+  rm(extr)
+}
+
+vp_l <- vp_l %>% 
+  select(plot, species, spec, part, hits) 
+
+vp_l %>% 
+  head(10)
+```
+
+```{r}
+vp_l %>% 
+  write_csv("2_data/2_clean/pinpoint/vp_pp_2025_l.csv")
+```
+
+```{r}
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'fen',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  rename(plot = code)
+
+spec_list <- read.csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
+
+vp <- vp_l %>% 
+  filter(part != "other")
+
+plot_stats <- spec_list %>%
+  select(spec, species, group) %>% 
+  right_join(vp , by = "species") %>%
+  group_by(plot, group, part) %>% 
+  summarise(hits = sum(hits)) %>% 
+  na.omit() %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code 
+  select(plot, habitat:site, group:hits)
+
+plot_stats %>% 
+  head(10)
+
+plot_stats %>%
+  readr::write_csv('2_data/2_clean/plot_stats_veg_2025.csv')
+```
+
+
+## trait data
+```{r}
+# taxonomic information
+spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r data import}
+# trait data
+traits_no_chem_raw <- read_csv("2_data/1_raw/traits/sf_traits_full_v1.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  mutate(treatment = case_when(treatment == 'C' ~ 'control',
+                           treatment == 'SF' ~ 'snowfence')) %>% 
+  left_join(spec_list, by = "spec") %>% # add taxonomic data
+  select(code:spec, species:group, everything())
+```
+
+```{r}
+leaf_chem <- read_csv("2_data/1_raw/traits/sf_leaf_chem.csv") %>% 
+  mutate(across(1:3, as.factor)) %>% 
+  mutate(across(4:8, as.numeric))
+```
+
+### trait data (full)
+```{r LDMC caclulation}
+traits_no_chem <- traits_no_chem_raw %>% 
+  mutate(LDMC = dweight / fweight) %>% 
+  select(code:leafa, LDMC); head(traits_no_chem, 10)
+```
+
+```{r SLA caclulation}
+traits_no_chem <- traits_no_chem_raw %>% 
+  mutate(SLA = leafa / dweight) %>% 
+  full_join(traits_no_chem) %>% 
+  select(code:dweight, leafa, LDMC, SLA); head(traits_no_chem, 10)
+
+traits_no_chem %>% 
+write_csv("2_data/2_clean/traits/traits_no_chem_w.csv")
+```
+
+```{r}
+traits_no_chem <- traits_no_chem %>% 
+  mutate(across(1:10, as.factor)) # convert catergorical variables to factor
+```
+
+```{r}
+# convert trait dataset to long format
+traits_no_chem_l <- traits_no_chem %>% 
+  pivot_longer(!code:group, names_to = "trait", values_to = "trait_value") 
+
+traits_no_chem_l %>% 
+write_csv("2_data/2_clean/traits/traits_no_chem_l.csv")
+```
+
+### trait data (pooled) 
+```{r}
+traits <- traits_no_chem %>%  # pool data by plot and species
+  group_by(plot, spec) %>% 
+  summarise(height = mean(height),
+            dweight = mean(dweight), 
+            fweight = mean(fweight),
+            leafa = mean(leafa), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA))
+
+traits <- traits_no_chem %>% # add taxonomic variables to pooled dataset
+  select(2:10) %>% 
+  right_join(traits, by = c("plot", "spec")) %>% 
+  distinct()
+```
+
+#### add leaf chem comp
+```{r}
+traits <- traits %>% 
+  left_join(leaf_chem, by = c("plot", "spec")) %>% # combined data has 3 extra rows??? 
+  select(ID, everything())
+
+traits %>% 
+write_csv("2_data/2_clean/traits/traits_w.csv")
+```
+
+```{r}
+# convert trait dataset to long format
+traits_l <- traits %>% 
+  pivot_longer(!ID:group, names_to = "trait", values_to = "trait_value") %>% 
+  filter(!is.na(ID))
+
+traits_l %>% 
+write_csv("2_data/2_clean/traits/traits_l.csv")
+```
+
+### Outlier checks
+```{r}
+traits_no_chem %>% 
+  ggplot(aes(x = species, y = SLA)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+```
+
+# upload to osf
+```{r}
+
+```
+

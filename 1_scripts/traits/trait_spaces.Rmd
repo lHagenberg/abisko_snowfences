@@ -1,0 +1,45 @@
+---
+title: "trait_spaces"
+author: "Liyenne"
+date: "2025-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+# data handling
+require(tidyverse)
+
+# analysis
+require(vegan)
+
+# visualization
+require(ggplot2)
+require(ggrepel)
+require(ggordiplots)
+require(ggvegan)
+```
+
+# Data import
+```{r data import}
+# trait data
+trait_data <- read_csv("2_data/2_clean_data/trait_data_w.csv")
+
+trait_data_long <- read_csv("2_data/2_clean_data/trait_data_l.csv")
+
+trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv")
+
+trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
+```
+
+```{r}
+# community composition data (long)
+community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv") 
+```
