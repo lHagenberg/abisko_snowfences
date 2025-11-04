@@ -19,77 +19,98 @@ library(here)
 knitr::opts_knit$set(root.dir = here())
 ```
 
+# Setup
 ```{r packages}
 require(readr)
 require(tidyverse)
 
+require(DHARMa)
+require(fitdistrplus)
+
 require(vegan)
 require(lme4)
+require(lmerTest)
 require(lsmeans)
+require(glmmTMB)
 require(rstatix)
+
+require(broom.mixed)
+require(performance)
 
 require(ggplot2)
 require(ggpubr)
 ```
-
+# Data import
 ```{r read data}
-vp_data_long <- readxl::read_excel("../../1_data/community_data/2025/pinpoint_data/SF_pinpoint_2025.xlsx", sheet = "VP") %>% 
-  slice(1:(n() - 4)) %>% 
-  pivot_longer(-c(part, species) ,names_to = "plot", values_to = "hits")
-
-vp_total_data <- read_csv("2_data/2_clean_data/vp_pp_2025_w.csv")
-
-
-vp_data_leaf <- read_csv("2_data/2_clean_data/vp_pp_leaf_2025_w.csv")
-
+community <- read.csv("2_data/2_clean/sf_community.csv")
 ```
 
 ```{r read data}
-meta_data <- readxl::read_excel("../../1_data/community_data/2025/pinpoint_data/SF_plot_data_2025.xlsx") %>% 
-  mutate(habitat = case_when(habitat == 'D' ~ 'fen',
+meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  mutate(site_id = str_sub(code, 1, 2),
+    habitat = case_when(habitat == 'D' ~ 'fen',
                            habitat == 'E' ~ 'heath',
-                           habitat == "X" ~ 'ridge')) 
+                           habitat == "X" ~ 'ridge')) %>% 
+  rename(plot_id = "code") %>% 
+  select(plot_id, site_id, habitat, treatment)
   
-plot_stats <- read_csv("2_data/2_clean_data/plot_stats_veg_2025.csv")# %>% 
-#  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
-#                           habitat == 'E' ~ 'heath',
-#                           habitat == "X" ~ 'ridge'))
+plot_stats <- read_csv("2_data/2_clean/plot_stats_veg_2025.csv") %>% 
+  rename(plot_id = "plot") %>% 
+  mutate(site_id = str_sub(plot_id, 1, 2)) %>% 
+  select(plot_id, site_id, site, habitat, treatment, group:hits)
 ```
 
+# Ordination
 ## NMDS
+```{r}
+# prep community datasets for ordination
+total_bm <- community %>% 
+  filter(part != "other") %>% 
+  group_by(plot, spec) %>% 
+  summarise(total_biomass = sum(biomass, na.rm = TRUE)) %>% 
+  pivot_wider(names_from = spec, values_from = total_biomass) %>% 
+  column_to_rownames("plot") 
+
+leaf_bm <- community %>%
+  filter(part == "leaf") %>% 
+  na.omit() %>% 
+  select(plot, spec, biomass) %>% 
+  pivot_wider(names_from = spec, values_from = biomass) %>% 
+  column_to_rownames("plot")
+
+total_hits <- community %>% 
+  filter(part != "other") %>% 
+  group_by(plot, spec) %>% 
+  summarise(total_hits = sum(hits)) %>% 
+  pivot_wider(names_from = spec, values_from = total_hits) %>% 
+  column_to_rownames("plot")
+
+leaf_hits <- community %>%
+  filter(part == "leaf") %>% 
+  select(plot, spec, hits) %>% 
+  pivot_wider(names_from = spec, values_from = hits) %>% 
+  column_to_rownames("plot")
+```
+
+### hits
 ```{r NMDS, include = FALSE}
-#vp_nmds <- vp_data %>%  
-#  column_to_rownames("plot") %>% 
-#  metaMDS() %>% 
-#  scores(tidy = TRUE) %>% 
-#  filter(score == "sites") %>% 
-#  select(NMDS1, NMDS2)
+hits_dist <- total_hits %>% 
+  vegdist(method = "bray", na.rm = TRUE)
 
-#spec_nmds <- vp_data %>%  
-#  column_to_rownames("plot") %>% 
-#  metaMDS() %>% 
-#  scores(tidy = TRUE) %>% 
-#  filter(score == "species") 
-
-vp_dist <- vp_total_data %>% 
-  column_to_rownames("plot") %>% 
-  vegdist(method = "morisita", na.rm = TRUE)
-
-vp_nmds <- vp_dist %>% 
-  metaMDS(distance = "morisita") %>% 
+hits_nmds <- hits_dist %>% 
+  metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "sites") %>% 
   select(NMDS1, NMDS2)
   
-spec_nmds <- vp_total_data %>%  
-  column_to_rownames("plot") %>% 
-  metaMDS(distance = "morisita") %>% 
+spec_nmds <- total_hits %>%  
+  metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "species") 
 
-meta_nmds <- vp_nmds %>% 
+meta_nmds <- hits_nmds %>% 
   rownames_to_column("code") %>% 
-  right_join(meta_data, vp_nmds, by = "code") %>% 
+  right_join(meta_data, hits_nmds, by = "code") %>% 
   select(code, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
@@ -103,8 +124,8 @@ hull_data <- meta_nmds %>% # find convex hulls
 ggplot() +
   geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3) + # add the point markers 
   geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
-  scale_colour_manual(values = c("#667E4E", "#917D53", "#A8AA97")) +
-  scale_fill_manual(values = c("#667E4E", "#917D53", "#A8AA97")) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
@@ -112,11 +133,13 @@ ggplot() +
   theme(legend.position = "bottom",
         legend.margin = margin(t = -8)) 
 
-ggsave("3_output/3_plots/sf_NMDS_morisita_25.svg", height = 4.5, width = 5)
+ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width = 5)
 ```
 
+#### analysis
 ```{r PERMANOVA}
-vp_data %>% 
+total_hits %>% 
+  rownames_to_column("code") %>%
   inner_join(meta_data, .) %>% 
 adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 9999, method = "bray")
 ```
@@ -124,20 +147,19 @@ adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, .
 
 ```{r PERMANOVA 2}
 # PERMANOVA based on distance matrix (bray)
-adonis2(vp_dist ~ meta_data$treatment * meta_data$habitat)
+adonis2(hits_dist ~ meta_data$treatment * meta_data$habitat)
 ```
 
 ```{r PERMANOVA meadow}
 # per habitat
 # meadow
 x <- meta_data %>% 
-  filter(habitat == "meadow")
+  filter(habitat == "fen")
 
-vp_dist <- vp_data[which(meta_data$habitat == "meadow"),] %>% 
-  select(-plot) %>%
+hits_dist <- total_hits[which(meta_data$habitat == "fen"),] %>% 
   vegdist()
 
-adonis2(vp_dist ~ x$treatment)
+adonis2(hits_dist ~ x$treatment)
 ```
 
 
@@ -146,11 +168,10 @@ adonis2(vp_dist ~ x$treatment)
 x <- meta_data %>% 
   filter(habitat == "heath")
 
-vp_dist <- vp_data[which(meta_data$habitat == "heath"),] %>% 
-  select(-plot) %>%
+hits_dist <- total_hits[which(meta_data$habitat == "heath"),] %>% 
   vegdist()
 
-adonis2(vp_dist ~ x$treatment)
+adonis2(hits_dist ~ x$treatment)
 ```
 
 
@@ -159,14 +180,61 @@ adonis2(vp_dist ~ x$treatment)
 x <- meta_data %>% 
   filter(habitat == "ridge")
 
-vp_dist <- vp_data[which(meta_data$habitat == "ridge"),] %>% 
-  select(-plot) %>%
+hits_dist <- total_hits[which(meta_data$habitat == "ridge"),] %>% 
   vegdist()
 
-adonis2(vp_dist ~ x$treatment)
+adonis2(hits_dist ~ x$treatment)
 ```
 
-## Species covers
+### biomass
+```{r NMDS, include = FALSE}
+bm_dist <- leaf_bm %>% 
+  select(!Rholap) %>% 
+  vegdist(method = "bray", na.rm = TRUE)
+
+bm_nmds <- bm_dist %>% 
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "sites") %>% 
+  select(NMDS1, NMDS2)
+  
+spec_nmds <- leaf_bm %>%  
+  select(!Rholap) %>% 
+  na.omit() %>% 
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "species") 
+
+meta_nmds <- bm_nmds %>% 
+  rownames_to_column("code") %>% 
+  right_join(meta_data, bm_nmds, by = "code") %>% 
+  select(code, habitat:treatment, NMDS1, NMDS2) %>% 
+  na.omit()
+```
+
+```{r NMDS plot (country), echo = FALSE}
+hull_data <- meta_nmds %>% # find convex hulls
+  group_by(habitat, treatment) %>% # for each combination of country and habitat
+  arrange(NMDS1, NMDS2) %>%
+  slice(chull(NMDS1, NMDS2))
+
+ggplot() +
+  geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3) + # add the point markers 
+  geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8)) 
+
+ggsave("3_output/1_figures/community/leaf_bm_NMDS_bray_25.tif", height = 4.5, width = 5)
+```
+
+
+## Species covers (outdated)
 ```{r}
 covDat <- meta_data %>% 
   cbind(vp_data1)
@@ -194,7 +262,7 @@ summary(fit)$coefficients[8]
 write_csv(VAS.cov.change, "3_output/2_results/species_cover_dif_2023.csv")
 ```
 
-# functional type cover difference
+# functional type abundances
 ```{r }
 plot_stats %>% 
   filter(part == "leaf") %>% 
@@ -213,7 +281,7 @@ plot_stats %>%
         axis.text.x = element_text(angle = 25, hjust = 1)
         )
 
-ggsave("3_output/3_plots/sf_type_leaf_hits_25.tif", height = 4, width = 4.5)
+ggsave("3_output/1_figures/community/sf_type_leaf_hits_25.tif", height = 4, width = 4.5)
 ```
 
 ```{r }
@@ -235,14 +303,150 @@ plot_stats %>%
         axis.text.x = element_text(angle = 25, hjust = 1)
         )
 
-ggsave("3_output/3_plots/sf_type_total_hits_25.tif", height = 4, width = 4.5)
+ggsave("3_output/1_figures/community/sf_type_total_hits_25.tif", height = 4, width = 4.5)
 ```
+
+### model test
+
+```{r}
+# fit distribution
+d <- plot_stats %>% # there is something strange about this data
+  filter(group == "eS") %>% 
+  filter(part == "leaf") 
+dist <- fitdist(d$hits, "nbinom")
+plot(dist)
+```
+
+```{r}
+d <- community %>% # there is something strange about this data
+  filter(group == "G") %>% 
+  filter(part == "leaf") 
+
+#fit <- glm.nb(hits ~ treatment * habitat, data = d) ; AIC(fit) # overdispersed for some groups
+
+fit <- glmer.nb(hits ~ treatment * habitat + (1 | spec), data = d)
+
+#fit <- glm(hits ~ treatment * habitat, data = d, family = quasipoisson) # most sensible results, but overdispersed
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+anova(fit)
+
+tidy(fit)
+glance(fit)
+r2(fit)
+
+# Get EMMs for each treatment-habitat combo
+emm <- emmeans(fit, ~ treatment | habitat)
+pairs(emm, adjust = "tukey") %>%
+  as.data.frame()
+```
+
+```{r trait model diagnostics}
+sim_resid <- simulateResiduals(fittedModel = fit)
+plot(sim_resid)
+testDispersion(sim_resid); rm(sim_resid)
+
+check_singularity(fit, tolerance = 1e-05)
+
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+### linear models
+```{r}
+groups <- unique(community$group)
+model_list <- list()
+
+for(gr in groups) {
+  model_list[[gr]] <- community %>% 
+    filter(group == gr) %>%
+    filter(part == "leaf") %>% 
+    glmer.nb(hits ~ treatment * habitat + (1 | spec), data = .)
+}
+
+car::Anova(model_list[["eS"]], type = "II")
+
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  
+  # Get R-squared
+  mod_stats <- glance(model) #%>% 
+  #  mutate(significance = case_when(
+  #  p.value < 0.001 ~ "***",
+  #  p.value < 0.01 ~ "**",
+  #  p.value < 0.05 ~ "*",
+  #  p.value < 0.1 ~ ".",
+  #  TRUE ~ ""
+  #))
+  
+  # Combine with species name
+  bind_cols(spec = gr, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  
+  # Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(group = gr) %>% 
+    dplyr::select(group, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+# pairwise comparisons 
+pair_comps <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  
+  # Get R-squared
+  emm <- emmeans(model, ~ treatment | habitat)
+  pair_comp <- pairs(emm, adjust = "tukey") %>%
+    as.data.frame() %>% 
+    mutate(group = gr) %>% 
+    dplyr::select(group, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/community/group_leaf_hits_glmer.nb_results.xls", overwrite = TRUE)
+```
+
 
 ```{r}
 # shrubs
 fit <- plot_stats %>% 
-  filter(type == "S") %>% 
-  glmer(hits ~ habitat / treatment + (habitat | number), family = poisson, data = .)
+  filter(group == "S") %>% 
+  glmer(hits ~ habitat / treatment + (habitat | site), family = poisson, data = .)
 summary(fit)
 anova(fit)
 

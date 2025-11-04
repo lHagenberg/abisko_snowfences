@@ -141,6 +141,8 @@ biomass_pinpoint %>%
   head(10)
 ```
 
+# biomass modelling
+## leaf biomass
 ```{r}
 # plotting leaf biomass vs pinpoint
 leaf_biomass_pinpoint %>% 
@@ -165,32 +167,30 @@ patchwork::wrap_plots(plot_list, ncol = 5)
 ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height =  30)
 ```
 
+### data prep
 ```{r}
-# plotting leaf biomass vs pinpoint
-stem_biomass_pinpoint %>% 
-  filter(spec == "Andpol") %>% 
-  ggplot(aes(x = hits_noNA, y = dweight)) + 
-  geom_point()
 
-species <- unique(stem_biomass_pinpoint$spec)
-plot_list <- list()
+vag_nig_sums <- leaf_biomass_pinpoint %>%
+  filter(spec %in% c("Carvag", "Carnig")) %>%
+  mutate(dweight = replace_na(dweight, 0)) %>% 
+  group_by(plot) %>%
+  summarise(hits = sum(hits, na.rm = TRUE), 
+            dweight = dweight) %>%
+  mutate(spec = "Carvag") %>% 
+  filter(dweight > 0) %>% 
+  mutate(hits = na_if(hits, 0)) %>% 
+  mutate(hits_noNA = replace_na(hits, 1)) 
 
-for(sp in species) {
-  plot_list[[sp]] <- stem_biomass_pinpoint %>%
-    filter(spec == sp) %>%
-    ggplot(aes(x = hits_noNA, y = dweight)) + 
-    geom_point() +
-    geom_smooth(method = "lm", se = TRUE) +
-    ggtitle(sp)
-}
+# Step 2: Remove original rows of those two species
+model_bio_pp <- leaf_biomass_pinpoint %>%
+  filter(!spec %in% c("Carvag", "Carnig"))
 
-patchwork::wrap_plots(plot_list, ncol = 5) 
-
-ggsave("3_output/1_figures/biomass/species_stem_biomass.tif", width = 30, height =  30)
+# Step 3: Add back the summed rows
+model_bio_pp <- bind_rows(model_bio_pp, vag_nig_sums)
+  
 ```
 
-# biomass modelling
-## leaf biomass
+
 ```{r}
 # exclude species with insufficient data
 model_bio_pp <- leaf_biomass_pinpoint %>% 
@@ -227,9 +227,37 @@ leaf_results <- map_dfr(names(model_list), function(sp) {
 leaf_results <- leaf_results %>% 
   mutate(sig = ifelse(p.value < 0.05, "*", "ns")) %>% 
   mutate(part = "leaf")
+
+leaf_results <- leaf_results[12,] %>% 
+  mutate(spec = "Carnig") %>% 
+  bind_rows(leaf_results)
 ```
 
 ## stem biomass
+```{r}
+# plotting leaf biomass vs pinpoint
+stem_biomass_pinpoint %>% 
+  filter(spec == "Andpol") %>% 
+  ggplot(aes(x = hits_noNA, y = dweight)) + 
+  geom_point()
+
+species <- unique(stem_biomass_pinpoint$spec)
+plot_list <- list()
+
+for(sp in species) {
+  plot_list[[sp]] <- stem_biomass_pinpoint %>%
+    filter(spec == sp) %>%
+    ggplot(aes(x = hits_noNA, y = dweight)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    ggtitle(sp)
+}
+
+patchwork::wrap_plots(plot_list, ncol = 5) 
+
+ggsave("3_output/1_figures/biomass/species_stem_biomass.tif", width = 30, height =  30)
+```
+
 ```{r}
 # exclude species with insufficient data
 model_bio_pp <- stem_biomass_pinpoint %>% 
@@ -305,6 +333,19 @@ community_biomass <- community_biomass %>%
   left_join(spec_list) %>% 
   select(plot, habitat:site, spec, species, family:group, part, hits, biomass)
 ```
+
+```{r}
+no_bm <- community_biomass %>%
+  filter(part == "leaf") %>% 
+  select(plot, spec, biomass) %>% 
+  pivot_wider(names_from = spec, values_from = biomass) %>% 
+  column_to_rownames("plot") %>% 
+  select(where(~all(is.na(.)))) %>% 
+  names()
+
+
+```
+
 
 ```{r}
 community_biomass %>% 

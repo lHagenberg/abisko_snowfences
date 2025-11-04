@@ -302,6 +302,7 @@ boot_traits_bm_short <- boot_traits_bm %>%
 dist <- fitdist(boot_traits_bm_short$wC, "norm")
 plot(dist)
 ```
+
 ### model test
 ```{r}
 fit <- lm(height ~ treatment * habitat, data = boot_traits_bm_short)
