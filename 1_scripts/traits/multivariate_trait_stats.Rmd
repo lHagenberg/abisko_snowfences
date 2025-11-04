@@ -3,6 +3,13 @@ title: "multivariate_trait_stats"
 author: "Liyenne"
 date: "2025-05-23"
 output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
 ---
 
 ```{r setup, include=FALSE}
@@ -34,35 +41,40 @@ require(gclus)
 # Data import
 ```{r data import}
 # trait data
-trait_data <- read_csv("2_data/2_clean_data/trait_data_w.csv")
-
-trait_data_long <- read_csv("2_data/2_clean_data/trait_data_l.csv")
-
-trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>% 
+traits_no_chem <- read_csv("2_data/2_clean/traits/traits_no_chem_w.csv") %>% 
   mutate(across(1:10, as.factor))
 
-trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
+traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>% 
+  mutate(across(1:10, as.factor))
+
+boot_traits <- read_csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv") %>% 
+  mutate(across(1:6, as.factor)) 
 ```
 
 ```{r}
 # community composition data (long)
-community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv") 
+community <- read_csv("2_data/2_clean/sf_community.csv") %>% 
+  mutate(across(1:10, as.factor))
+
+# species list 
+spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
 ```
 
 # PCA 
 ```{r}
-trait_data_pooled %>% 
+traits %>% 
   #select(species, height:CN_ratio) %>% 
   na.omit() %>% 
   ggpairs(columns = 11:21, 
           mapping = aes(color = habitat))
 
-ggsave("3_output/Figures/variables.svg")
+ggsave("3_output/1_figures/traits/variables.tif")
 ```
 
 ## species traits
 ```{r}
-species_traits <- trait_data_pooled %>% 
+species_traits <- traits %>% 
   filter(complete.cases(.)) %>% 
   group_by(species) %>% 
   summarise(plant_height = mean(height), 
@@ -89,7 +101,7 @@ trait_scores <- as.data.frame(species_pca$CA$v[, 1:2])
 trait_scores$trait <- as.factor(rownames(trait_scores))
 
 species_scores <- species_scores %>% 
-  left_join(species_list)
+  left_join(spec_list)
 
 ```
 
@@ -107,30 +119,30 @@ ggplot() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group") 
+  labs(x = "PC1 (38%)", y = "PC2 (21%)", color = "Functional group") 
   
 
-ggsave("3_output/Figures/species_pca1.svg", height = 5, width = 6)
+ggsave("3_output/1_figures/traits/species_pca.tif", height = 5, width = 6)
 ```
 
-## trait observations (pooled)
+## traits (with chem)
 ```{r}
-pca_traits <- trait_data_pooled %>% 
+traits_pca <- traits %>% 
   filter(complete.cases(.)) %>% 
   column_to_rownames(var = "ID") %>% 
-  select(10, 14:20) %>% 
+  select(height, LDMC:CN_ratio) %>% 
   scale() %>% 
   rda()
 
-summary(pca_traits)
+summary(traits_pca)
 
-site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
+site_scores <- as.data.frame(traits_pca$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
-trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
+trait_scores <- as.data.frame(traits_pca$CA$v[, 1:2])
 trait_scores$trait <- as.factor(rownames(trait_scores))
 
 
-site_scores <- trait_data_pooled %>%
+site_scores <- traits %>%
   select(ID:group) %>% 
   right_join(site_scores)
 
@@ -150,26 +162,28 @@ ggplot() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (41%)", y = "PC2 (17%)") 
+  labs(x = "PC1 (40%)", y = "PC2 (18%)") 
+
+ggsave("3_output/1_figures/traits/traits_pca.tif", height = 5, width = 6)
 ```
 
-## trait observations (umpooled)
+## traits (no chem)
 ```{r}
-pca_traits <- trait_data %>% 
+traits_no_chem_pca <- traits_no_chem %>% 
   filter(complete.cases(.)) %>% 
   column_to_rownames(var = "code") %>% 
-  select(10, 14:15) %>% 
+  select(height, LDMC, SLA) %>% 
   scale() %>% 
   rda()
 
-summary(pca_traits)
+summary(traits_no_chem_pca)
 
-site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
+site_scores <- as.data.frame(traits_no_chem_pca$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
-trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
+trait_scores <- as.data.frame(traits_no_chem_pca$CA$v[, 1:2])
 trait_scores$trait <- as.factor(rownames(trait_scores))
 
-site_scores <- trait_data %>%
+site_scores <- traits_no_chem %>%
   select(code:group) %>% 
   rename(ID = code) %>% 
   right_join(site_scores)
@@ -186,6 +200,9 @@ ggplot() +
   geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  theme_classic() +
   theme_classic() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
@@ -193,9 +210,58 @@ ggplot() +
   labs(x = "PC1 (49%)", y = "PC2 (15%)") 
 ```
 
+## community traits
+```{r}
+plot_traits <- boot_traits %>% 
+  group_by(plot, trait) %>% 
+  summarise(boot_mean = mean (mean)) %>% 
+  pivot_wider(id_cols = plot, names_from = trait, values_from = boot_mean) %>% 
+  column_to_rownames(var = "plot") %>% 
+  select(-c(dweight, fweight, leafa)) 
+
+plot_pca <- plot_traits %>% 
+  scale() %>% 
+  rda()
+
+summary(plot_pca)
+
+site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
+site_scores$ID <- as.factor(rownames(site_scores))
+trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+site_scores <- boot_traits %>%
+  select(plot:site) %>% 
+  unique() %>% 
+  rename(ID = plot) %>% 
+  right_join(site_scores)
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = site_scores, aes(x = PC1, y = PC2, color = habitat, shape = treatment), size = 3, stroke = 1, alpha = .7) + # add the point markers
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  scale_shape_manual(values = c(16, 8)) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (70%)", y = "PC2 (16%)") 
+
+ggsave("3_output/1_figures/traits/plot_pca.tif", height = 5, width = 6)
+```
+
 # GLLVM
 ```{r}
-y <- community_data %>% 
+y <- community %>% 
+  filter(part == "leaf") %>% 
   pivot_wider(id_cols = plot, names_from = species, values_from = hits) %>% 
   column_to_rownames("plot") %>% 
   as.matrix()

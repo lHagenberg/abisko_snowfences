@@ -259,7 +259,9 @@ boot_traits_bm <- trait_np_bootstrap(filled_traits = filled_traits_bm, nrep = 10
 
 trait_summarise_boot_moments(boot_traits_bm)
 
-write_csv(boot_traits_bm, "2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
+boot_traits_bm %>% 
+  select(plot, habitat, treatment, site, everything()) %>%
+  write_csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
 ```
 
 ```{r}
