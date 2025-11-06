@@ -1,0 +1,159 @@
+---
+title: "multivar_community_analysis"
+author: "Liyenne"
+date: "2025-11-05"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+## packages
+```{r}
+library(tidyverse)
+
+library(gllvm)
+
+#plotting
+library(ggplot2)
+library(gclus)
+library(corrplot)
+```
+
+
+## data import
+```{r read data}
+# community data
+community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
+  mutate(site_id = str_sub(plot, 1, 2)) %>% 
+  select(plot:site, site_id, everything())
+```
+
+```{r}
+# trait data
+traits <- read.csv("2_data/2_clean/traits/traits_w.csv")
+```
+
+
+# GLLVM
+```{r}
+# plot meta data
+x <- community %>% 
+  filter(part == "leaf") %>% 
+  select(plot:site_id) %>% 
+  group_by(plot) %>% 
+  unique() %>%  
+  column_to_rownames("plot") %>% 
+  as.matrix()
+  
+# plant community data
+y <- community %>% 
+  filter(part == "leaf") %>% 
+  pivot_wider(id_cols = plot, names_from = species, values_from = hits) %>% 
+  column_to_rownames("plot") %>% 
+  select(where(~sum(., na.rm = TRUE) > 0)) %>% 
+  as.matrix()
+
+tr <- traits %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) %>% 
+  column_to_rownames(var = "species")
+```
+
+## model selection
+```{r}
+fit1 <- gllvm(y, family = poisson())
+fit1
+
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+plot(fit1, var.colors = 1)
+
+fit2 <- gllvm(y, family = "negative.binomial")
+fit2
+
+par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+plot(fit2, var.colors = 1)
+```
+
+```{r}
+ordiplot(fit2, biplot = TRUE, ind.spp = 15, xlim = c(-3, 3), ylim = c(-3, 3), 
+         main = "Biplot")
+```
+
+## model with environmental variables
+```{r}
+criteria <- NULL
+for(i in 1:5){
+  fiti <- gllvm(y, x, family = "negative.binomial", num.lv = i, sd.errors = FALSE,
+                formula = ~ habitat + treatment, seed = 1234)
+  criteria[i] <- summary(fiti)$AICc
+  names(criteria)[i] = i
+}
+
+criteria
+```
+
+```{r}
+fit_env <- gllvm(y, x, family = "negative.binomial", num.lv = 1,
+                 formula = ~ habitat + treatment, seed = 1234)
+
+ordiplot(fit_env, biplot = TRUE)
+
+coefplot.gllvm(fit_env, cex.ylab = 0.7, mar = c(4, 9, 2, 1), mfrow=c(1,1))
+```
+ 
+## species co-occurrence
+```{r}
+fitlvm <- gllvm(y, family = "negative.binomial", num.lv = 1, seed = 1234)
+
+ordiplot(fitlvm, biplot = TRUE)
+
+tiff("3_output/1_figures/community/spec_correlations.tif", width = 1800, height = 1800, res = 300)
+cr0 <- getResidualCor(fitlvm)
+corrplot(cr0[order.single(cr0), order.single(cr0)], diag = FALSE, type = "lower", 
+         method = "square", tl.cex = 0.5, tl.srt = 45, tl.col = "red")
+dev.off()
+
+tiff("3_output/1_figures/community/spec_correlations_env.tif", width = 1800, height = 1800, res = 300)
+cr0 <- getResidualCor(fit_env)
+corrplot(cr0[order.single(cr0), order.single(cr0)], diag = FALSE, type = "lower", 
+         method = "square", tl.cex = 0.5, tl.srt = 45, tl.col = "red")
+dev.off()
+```
+
+
+```{r}
+library(mvabund)
+data(antTraits)
+Y <- as.matrix(antTraits$abund)
+X <- scale(as.matrix(antTraits$env))
+TR <- antTraits$traits
+```
+
+## fourth corner models
+```{r}
+fit_4th <- gllvm(y, x, tr, family = "negative.binomial", num.lv = 1, 
+                 formula = y ~ (habitat + tretment) +
+                (habitat + tretment) : (height + 
+                SLA + LDMC), seed = 123,
+                row.eff = "random", control.start =list(n.init = 3, jitter.var = 0.01),
+                randomX = ~ habitat + tretment)
+```
+
