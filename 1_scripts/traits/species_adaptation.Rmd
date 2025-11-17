@@ -18,6 +18,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
+library(openxlsx)
+
 # data handling
 require(tidyverse)
 require(broom)
@@ -43,69 +45,262 @@ require(fitdistrplus)
 ```
 
 # Data import
-```{r data import}
-# trait data
-traits <- read_csv("2_data/2_clean_data/trait_data_w.csv") %>%
-  mutate(across(code:group, as.factor))
-
-traits_l <- read_csv("2_data/2_clean_data/trait_data_l.csv")%>%
-  mutate(across(code:group, as.factor))
-
-traits_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>%
-  mutate(across(ID:group, as.factor))
-
-
-traits_pooled_l <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv") %>%
-  mutate(across(ID:group, as.factor))
-```
-
 ```{r}
 # taxonomic information
-species_list <- read_csv("../snowfence_community/2_data/1_raw_data/sf_vp_species_list.csv") %>% 
+spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
   mutate(across(1:5, as.factor))
 ```
 
+```{r data import}
+traits_no_chem <- read_csv("2_data/2_clean/traits/traits_no_chem_w.csv") %>% 
+  mutate(across(1:10, as.factor))
+
+traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>% 
+  mutate(across(1:10, as.factor))
+
+traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>% 
+  mutate(across(1:11, as.factor))
+
+boot_traits <- read_csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv") %>% 
+  mutate(across(1:6, as.factor))
+
+try_traits <- read_csv("2_data/2_clean/traits/try_traits.csv") %>% 
+  select(-...1) 
+  
+```
+
+
 ```{r}
 # community composition data (l)
-community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_leaf_2025_l_fn.csv") %>% 
-  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
-    grepl('D', plot), 'fen', ifelse(
-      grepl('E', plot), 'heath', 'ridge'))
-    )) %>% 
-  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
-    grepl('C', plot), 'control', 'snowfence'
-    ))) %>%  
-  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
-  left_join(species_list, by = "species") %>% 
-  select(plot, habitat, site, treatment, spec, species, family:group, hits)
+community <- read_csv("2_data/2_clean/sf_community.csv") 
 ```
 
-```{r}
-# biomass model outputs
-biomass_models <- read_csv("3_output/Results/biomass_pinpoint_models.csv")
-```
 
 # Analysis
+## local vs. global
+```{r}
+try_traits <- try_traits %>% 
+  mutate(treatment = "global") %>% 
+  left_join(spec_list) %>% 
+  mutate(across(c(1:3, 5, 6), as.factor))
+
+all_traits <- bind_rows(try_traits, traits_l)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+
+all_traits %>% 
+  filter(#spec == "Betnan",
+         trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  ggplot(aes(x = group, y = trait_value, fill = treatment)) +
+  #geom_violin(trim = FALSE, position = position_dodge(.8),) +
+  geom_boxplot(outliers = FALSE, position = position_dodge(.6), width = .6) +
+  geom_jitter(aes(color = treatment), alpha = 0.2,
+              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.6)) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) +
+  scale_x_discrete(labels=c("dS" = "d. shrubs", "eS" = "e. shrubs", "F" = "forbs", "G" = "graminoids")) +
+  labs(x = "Functional group", y = "Trait value") +
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/1_figures/traits/local_global_traits_comparison.tif", height = 6, width = 8)
+```
+
+### model test
+```{r seedling count distribution, echo = FALSE}
+d <- all_traits %>% 
+  filter(spec == "Empnig" & trait == "wN") 
+dist <- fitdist(d$trait_value, "norm")
+plot(dist)
+```
+
+```{r}
+# lmm (produces singular warning!)
+fit1 <- lm(trait_value ~ treatment, data = filter(all_traits, spec == "Empnig" & trait == "height"))
+
+summary(fit1)
+car::Anova(fit1, type = "II")
+
+emmeans(fit1, pairwise ~ treatment) %>% 
+  pairs() %>% 
+  as.data.frame() 
+```
+
+```{r}
+# model with covariate adjustment
+fit2 <- lm(trait_value ~ treatment * habitat, data = filter(traits_l, spec == "Empnig" & trait == "height"))
+
+summary(fit2)
+car::Anova(fit2, type = "II") 
+
+glance(fit2)
+
+AIC(fit1, fit2)
+```
+
+```{r trait model diagnostics}
+sim_resid <- simulateResiduals(fittedModel = fit1)
+plot(sim_resid)
+testDispersion(sim_resid); rm(sim_resid)
+
+check_singularity(fit1, tolerance = 1e-05)
+
+
+x <- check_collinearity(fit1)
+plot(x); rm(x)
+```
+
+### model loop
 ```{r}
 # exclude species with insufficient data
-model_sp_traits <- traits_pooled_l %>% 
-  group_by(spec, trait) %>% 
-  filter(n_distinct(treatment) >= 2 & n_distinct(habitat) >= 2)  
+model_sp_traits <- all_traits %>% 
+  group_by(group, trait) %>% 
+  filter(n_distinct(treatment) >= 2) %>%
+  filter(!trait %in% c("dweight", "fweight", "leafa"))
 
-species <- unique(model_sp_traits$spec)
-traits <- unique(model_sp_traits$trait)
-spec_trait_grid <- expand_grid(spec = species, trait = traits) %>% 
-  mutate(spec = as.character(spec)) %>% 
+gr <- unique(model_sp_traits$group)
+tr <- unique(model_sp_traits$trait) 
+  
+group_trait_grid <- expand_grid(group = gr, trait = tr) %>% 
+  mutate(group = as.character(group)) %>% 
   as.data.frame()
 model_list <- list()
 i <- 1
 ```
 
-## species response to treatment
+```{r}
+for(i in 1:nrow(group_trait_grid)) {
+  key <- paste(group_trait_grid[i, "group"], group_trait_grid[i, "trait"], sep = "_")
+  model_data <- all_traits %>% 
+    filter(group == group_trait_grid[i, "group"] & 
+             trait == group_trait_grid[i, "trait"])
+  model_list[[key]] <- lm(trait_value ~ treatment, data = model_data)
+  rm(model_data, key)
+}
 
+# View a specific model
+summary(model_list[["dS_wN"]])
+```
+
+
+```{r}
+# extract model coefficients
+get_model_pars <- function(grtr, model_list) {
+  model <- model_list[[grtr]]
+  
+  # Get coefficients (estimate, std.error, p.value)
+  p.vals <- car::Anova(model, type = "II") %>% 
+  tidy() %>% 
+  dplyr::select(term, p.value) %>% 
+  pivot_wider(names_from = term, values_from = p.value) %>% 
+  dplyr::select(!Residuals)
+  
+  # Get R-squared
+  model_pars <- glance(model) %>% 
+    dplyr::select(r.squared:p.value) 
+  
+  # Combine with species name
+  bind_cols(spec = sptr, model_pars, p.vals)
+}
+
+results <- map(names(model_list), safely(get_model_pars), model_list = model_list)
+results_list <- map(results, "result")
+results_df <- results_list[!map_lgl(results_list, is.null)] %>%
+  list_rbind()
+
+results_df <- results_df %>% 
+  mutate(sig = ifelse(p.value < 0.05, "*", "ns"))
+```
+
+```{r}
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(model_list), function(gr_tr) {
+  model <- model_list[[gr_tr]]
+  
+  # Get R-squared
+  mod_stats <- glance(model) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+  
+  # Combine with species name
+  bind_cols(group_trait = gr_tr, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(model_list), function(gr_tr) {
+  model <- model_list[[gr_tr]]
+  
+# Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(group_trait = gr_tr) %>% 
+    dplyr::select(group_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+  
+
+# pairwise comparisons 
+pair_comps <- map_dfr(names(model_list), function(gr_tr) {
+  model <- model_list[[gr_tr]]
+  
+  # Get R-squared
+  emm <- emmeans(model, ~ treatment)
+  pair_comp <- pairs(emm, adjust = "tukey") %>%
+    as.data.frame() %>% 
+    mutate(group_trait = gr_tr) %>% 
+    dplyr::select(group_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/traits/local_global_trait_comp_lm.xls", overwrite = TRUE)
+```
+
+
+## species response to treatment
 How does individual species response differ between treatments? what is the direction of this response and what is it related to? 
 ```{r plant height plot, echo = FALSE}
-traits_pooled %>% 
+traits %>% 
   ggplot(aes(x = habitat, y = height, color = treatment)) +
   geom_boxplot() +
   geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
@@ -117,17 +312,17 @@ traits_pooled %>%
 ggsave("3_output/Figures/plant_height.svg", height = 4, width = 25)
 ```
 
-### plant height
+### model test
 ```{r seedling count distribution, echo = FALSE}
-d <- traits_pooled_l %>% 
-  filter(spec == "Betnan" & trait == "height") 
+d <- traits_l %>% 
+  filter(spec == "Empnig" & trait == "height") 
 dist <- fitdist(d$trait_value, "norm")
 plot(dist)
 ```
 
 ```{r}
 # lmm (produces singular warning!)
-fit1 <- lmer(trait_value ~ treatment + (1 |habitat), data = filter(traits_pooled_l, spec == "Andpol" & trait == "height"))
+fit1 <- lmer(trait_value ~ treatment + (1 |habitat), data = filter(traits_l, spec == "Empnig" & trait == "height"))
 
 summary(fit1)
 car::Anova(fit1, type = "II")
@@ -139,26 +334,50 @@ x <- emmeans(fit1, pairwise ~ treatment) %>%
 
 ```{r}
 # model with covariate adjustment
-fit2 <- lm(trait_value ~ habitat * treatment, data = filter(traits_pooled_l, spec == "Andpol" & trait == "height"))
+fit2 <- lm(trait_value ~ treatment * habitat, data = filter(traits_l, spec == "Empnig" & trait == "height"))
 
 summary(fit2)
-car::Anova(fit2, type = "II") %>% 
-  tidy() %>% 
-  dplyr::select(term, p.value) %>% 
-  pivot_wider(names_from = term, values_from = p.value) %>% 
-  dplyr::select(!Residuals)
+car::Anova(fit2, type = "II") 
 
 glance(fit2)
 
 AIC(fit1, fit2)
 ```
 
+```{r trait model diagnostics}
+sim_resid <- simulateResiduals(fittedModel = fit2)
+plot(sim_resid)
+testDispersion(sim_resid); rm(sim_resid)
 
-#### model loop
+check_singularity(fit2, tolerance = 1e-05)
+
+
+x <- check_collinearity(fit2)
+plot(x); rm(x)
+```
+
+### model loop
+```{r}
+# exclude species with insufficient data
+model_sp_traits <- traits_l %>% 
+  group_by(spec, trait) %>% 
+  filter(n_distinct(treatment) >= 2 & n_distinct(habitat) >= 2) %>%
+  filter(!trait %in% c("dweight", "fweight", "leafa"))
+
+sp <- unique(model_sp_traits$spec)
+tr <- unique(model_sp_traits$trait) 
+  
+spec_trait_grid <- expand_grid(spec = sp, trait = tr) %>% 
+  mutate(spec = as.character(spec)) %>% 
+  as.data.frame()
+model_list <- list()
+i <- 1
+```
+
 ```{r}
 for(i in 1:nrow(spec_trait_grid)) {
   key <- paste(spec_trait_grid[i, "spec"], spec_trait_grid[i, "trait"], sep = "_")
-  model_data <- traits_pooled_l %>% 
+  model_data <- traits_l %>% 
     filter(spec == spec_trait_grid[i, "spec"] & 
              trait == spec_trait_grid[i, "trait"])
   model_list[[key]] <- lm(trait_value ~ treatment * habitat, data = model_data)
@@ -166,8 +385,11 @@ for(i in 1:nrow(spec_trait_grid)) {
 }
 
 # View a specific model
-summary(model_list[["Andpol_height"]])
+summary(model_list[["Empnig_height"]])
+```
 
+
+```{r}
 # extract model coefficients
 get_model_pars <- function(sptr, model_list) {
   model <- model_list[[sptr]]
@@ -195,4 +417,93 @@ results_df <- results_list[!map_lgl(results_list, is.null)] %>%
 results_df <- results_df %>% 
   mutate(sig = ifelse(p.value < 0.05, "*", "ns"))
 ```
+```{r}
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  
+  # Get R-squared
+  mod_stats <- glance(model) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+  
+  # Combine with species name
+  bind_cols(spec = gr, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  
+  # Check residual df
+  resid_df <- df.residual(model)
+  
+  # Skip if no residual df
+  if (is.null(resid_df) || resid_df == 0) {
+    warning(paste("Skipping", gr, "- residual df = 0"))
+    return(NULL)
+  }
+  
+  # Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(group = gr) %>% 
+    dplyr::select(group, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+# pairwise comparisons 
+# Create safe version
+safe_pairs <- possibly(
+  function(model, gr) {
+    emm <- emmeans(model, ~ treatment | habitat)
+    pairs(emm, adjust = "tukey") %>%
+      as.data.frame() %>% 
+      mutate(group = gr) %>% 
+      dplyr::select(group, everything()) %>% 
+      mutate(significance = case_when(
+        p.value < 0.001 ~ "***",
+        p.value < 0.01 ~ "**",
+        p.value < 0.05 ~ "*",
+        p.value < 0.1 ~ ".",
+        TRUE ~ ""
+      ))
+  },
+  otherwise = NULL
+)
+
+# Apply to all models
+pair_comps <- map_dfr(names(model_list), function(gr) {
+  model <- model_list[[gr]]
+  safe_pairs(model, gr)
+}, .progress = TRUE)
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/traits/ITV_lm_results.xls", overwrite = TRUE)
+```
+
 

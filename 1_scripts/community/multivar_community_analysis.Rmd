@@ -21,6 +21,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 
+library(vegan)
 library(gllvm)
 
 #plotting
@@ -43,8 +44,48 @@ community <- read.csv("2_data/2_clean/sf_community.csv") %>%
 traits <- read.csv("2_data/2_clean/traits/traits_w.csv")
 ```
 
+```{r}
+meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  mutate(site_id = str_sub(code, 1, 2),
+    habitat = case_when(habitat == 'D' ~ 'fen',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  rename(plot_id = "code") %>% 
+  select(plot_id, site_id, habitat, treatment)
+```
 
-# GLLVM
+
+# Ordination
+```{r}
+# prep community datasets for ordination
+total_bm <- community %>% 
+  filter(part != "other") %>% 
+  group_by(plot, spec) %>% 
+  summarise(total_biomass = sum(biomass, na.rm = TRUE)) %>% 
+  pivot_wider(names_from = spec, values_from = total_biomass) %>% 
+  column_to_rownames("plot") 
+
+leaf_bm <- community %>%
+  filter(part == "leaf") %>% 
+  na.omit() %>% 
+  select(plot, spec, biomass) %>% 
+  pivot_wider(names_from = spec, values_from = biomass) %>% 
+  column_to_rownames("plot")
+
+total_hits <- community %>% 
+  filter(part != "other") %>% 
+  group_by(plot, spec) %>% 
+  summarise(total_hits = sum(hits)) %>% 
+  pivot_wider(names_from = spec, values_from = total_hits) %>% 
+  column_to_rownames("plot")
+
+leaf_hits <- community %>%
+  filter(part == "leaf") %>% 
+  select(plot, spec, hits) %>% 
+  pivot_wider(names_from = spec, values_from = hits) %>% 
+  column_to_rownames("plot")
+```
+
 ```{r}
 # plot meta data
 x <- community %>% 
@@ -52,16 +93,15 @@ x <- community %>%
   select(plot:site_id) %>% 
   group_by(plot) %>% 
   unique() %>%  
-  column_to_rownames("plot") %>% 
-  as.matrix()
+  column_to_rownames("plot") 
   
 # plant community data
 y <- community %>% 
   filter(part == "leaf") %>% 
   pivot_wider(id_cols = plot, names_from = species, values_from = hits) %>% 
   column_to_rownames("plot") %>% 
-  select(where(~sum(., na.rm = TRUE) > 0)) %>% 
-  as.matrix()
+  select(where(~sum(., na.rm = TRUE) > 0)) 
+
 
 tr <- traits %>% 
   filter(complete.cases(.)) %>% 
@@ -77,6 +117,201 @@ tr <- traits %>%
   column_to_rownames(var = "species")
 ```
 
+## CCA 
+### treatment controlling for habitat
+```{r}
+main_cca <- cca(y ~ treatment + Condition(habitat), x)
+permutest(main_cca, permutations = how(nperm = 9999))
+```
+
+```{r}
+# get CCA scores ready for plotting
+species_cca <- fortify(main_cca) %>% 
+  filter(score == "species")
+species_cca[3:8] <- species_cca[, 3:8] * 2.5 
+
+meta_cca <- fortify(main_cca) %>% 
+  filter(score == "sites") %>% 
+  column_to_rownames("label") %>% 
+  dplyr::select(!score)
+  
+meta_cca <- cbind(y, meta_cca)
+
+# create convex hulls
+hull_data <- meta_cca %>% # find convex hulls
+  group_by(country) %>% # for each combination of country and habitat
+  arrange(CCA1, CA1) %>%
+  slice(chull(CCA1, CA1))
+
+p1 <- ggplot() + 
+  geom_polygon(data = hull_data, aes(x = CCA1, y = CA1, fill = country, color = country), alpha = 0.30) + 
+  geom_point(data = meta_cca, aes(x = CCA1, y = CA1, shape = habitat, colour = country), size = 3, alpha = 0.70) + # add the point markers
+     scale_color_manual(values = c("#EB956A", "#77BFBC"), labels = c("High", "Low")) + 
+  scale_fill_manual(values = c("#EB956A", "#77BFBC"), labels = c("High", "Low")) +
+  scale_shape_manual(values = c(15, 16, 17, 3), labels = c("Forest", "Forest edge", "Low tundra", "High tundra")) + 
+  geom_text_repel(data = species_cca, aes(x = CCA1, y = CA1, label = label), size = 4,  alpha = 0.7) +  # add the species labels
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  labs(fill = "Reindeer density", color = "Reindeer density", shape = "Habitat") +
+  theme_classic() +
+  guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)); print(p1)
+
+#ggsave("3_output/2_graphs/publication_ready/Fig4_cca.svg", height = 3.5, width = 7.2)
+```
+
+### treatment * habitat
+```{r}
+main_cca <- cca(y ~ treatment * habitat, x)
+permutest(main_cca, permutations = how(nperm = 999))
+```
+
+## NMDS
+### hits
+```{r NMDS, include = FALSE}
+hits_dist <- total_hits %>% 
+  vegdist(method = "bray", na.rm = TRUE)
+
+hits_nmds <- hits_dist %>% 
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "sites") %>% 
+  select(NMDS1, NMDS2)
+  
+spec_nmds <- total_hits %>%  
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "species") 
+
+meta_nmds <- hits_nmds %>% 
+  rownames_to_column("code") %>% 
+  right_join(meta_data, hits_nmds, by = "code") %>% 
+  select(code, habitat:treatment, NMDS1, NMDS2) %>% 
+  na.omit()
+```
+
+```{r NMDS plot (country), echo = FALSE}
+hull_data <- meta_nmds %>% # find convex hulls
+  group_by(habitat, treatment) %>% # for each combination of country and habitat
+  arrange(NMDS1, NMDS2) %>%
+  slice(chull(NMDS1, NMDS2))
+
+ggplot() +
+  geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3) + # add the point markers 
+  geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8)) 
+
+ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width = 5)
+```
+
+#### analysis
+```{r PERMANOVA}
+total_hits %>% 
+  rownames_to_column("code") %>%
+  inner_join(meta_data, .) %>% 
+adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 9999, method = "bray")
+```
+
+
+```{r PERMANOVA 2}
+# PERMANOVA based on distance matrix (bray)
+adonis2(hits_dist ~ plot_data$treatment * plot_data$habitat)
+```
+
+```{r PERMANOVA meadow}
+# per habitat
+# meadow
+x <- meta_data %>% 
+  filter(habitat == "fen")
+
+hits_dist <- total_hits[which(meta_data$habitat == "fen"),] %>% 
+  vegdist()
+
+adonis2(hits_dist ~ x$treatment)
+```
+
+
+```{r PERMANOVA heath}
+# heath
+x <- meta_data %>% 
+  filter(habitat == "heath")
+
+hits_dist <- total_hits[which(meta_data$habitat == "heath"),] %>% 
+  vegdist()
+
+adonis2(hits_dist ~ x$treatment)
+```
+
+
+```{r PERMANOVA ridge}
+# ridge
+x <- meta_data %>% 
+  filter(habitat == "ridge")
+
+hits_dist <- total_hits[which(meta_data$habitat == "ridge"),] %>% 
+  vegdist()
+
+adonis2(hits_dist ~ x$treatment)
+```
+
+### biomass
+```{r NMDS, include = FALSE}
+bm_dist <- leaf_bm %>% 
+  select(!Rholap) %>% 
+  vegdist(method = "bray", na.rm = TRUE)
+
+bm_nmds <- bm_dist %>% 
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "sites") %>% 
+  select(NMDS1, NMDS2)
+  
+spec_nmds <- leaf_bm %>%  
+  select(!Rholap) %>% 
+  na.omit() %>% 
+  metaMDS(distance = "bray") %>% 
+  scores(tidy = TRUE) %>% 
+  filter(score == "species") 
+
+meta_nmds <- bm_nmds %>% 
+  rownames_to_column("code") %>% 
+  right_join(meta_data, bm_nmds, by = "code") %>% 
+  select(code, habitat:treatment, NMDS1, NMDS2) %>% 
+  na.omit()
+```
+
+```{r NMDS plot (country), echo = FALSE}
+hull_data <- meta_nmds %>% # find convex hulls
+  group_by(habitat, treatment) %>% # for each combination of country and habitat
+  arrange(NMDS1, NMDS2) %>%
+  slice(chull(NMDS1, NMDS2))
+
+ggplot() +
+  geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3) + # add the point markers 
+  geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8)) 
+
+ggsave("3_output/1_figures/community/leaf_bm_NMDS_bray_25.tif", height = 4.5, width = 5)
+```
+
+
+
+# GLLVM
 ## model selection
 ```{r}
 fit1 <- gllvm(y, family = poisson())

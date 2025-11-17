@@ -51,7 +51,6 @@ traits_no_chem_l <- read_csv("2_data/2_clean/traits/traits_no_chem_l.csv")%>%
 traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>%
   mutate(across(ID:group, as.factor))
 
-
 traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>%
   mutate(across(ID:group, as.factor))
 ```
@@ -229,7 +228,7 @@ boot_traits_bm %>%
 ggsave("3_output/1_figures/traits/bootstrapped_traits_bm_2025.tif", height = 4, width = 5)
 ```
 
-# biomass weighted
+## biomass weighted
 ```{r}
 # get a vector of species with significant biomass pinpoint relationships
 sig_spec <- biomass_models %>% 

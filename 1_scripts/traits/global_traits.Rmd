@@ -3,6 +3,13 @@ title: "global_data"
 author: "Liyenne"
 date: "2025-06-03"
 output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
 ---
 
 ```{r setup, include=FALSE}
@@ -12,13 +19,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
-script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
-setwd(file.path(script_dir, "..", "..")); rm(script_dir)
-
 # data handling
 require(readr)
-require(rtry)
 require(tidyverse)
+require(rtry)
 require(WorldFlora)
 
 # analysis
@@ -31,17 +35,15 @@ require(ggplot2)
 # Data import
 ```{r data import}
 # trait data
-trait_data <- read_csv("2_data/2_clean_data/trait_data_w.csv")
+traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>%
+  mutate(across(ID:group, as.factor))
 
-trait_data_long <- read_csv("2_data/2_clean_data/trait_data_l.csv")
-
-trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv")
-
-trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
+traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>%
+  mutate(across(ID:group, as.factor))
 
 global_traits <- read_csv("2_data/1_raw_data/global_traits/TTT_cleaned_dataset_v1.csv")
 
-try_data <- rtry_import("../../1_data/TRY_data/42107.txt") #%>% 
+try_data <- rtry_import("2_data/1_raw/traits/try_data.txt") #%>% 
 #  select(ObservationID, SpeciesName, TraitID, TraitName, #OrigValueStr) %>% 
 #  filter(TraitID != 42) %>% 
 #  na.omit() %>% 
@@ -51,7 +53,7 @@ try_data <- rtry_import("../../1_data/TRY_data/42107.txt") #%>%
 
 ```{r}
 # community composition data (long)
-community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv") 
+community <- read_csv("2_data/2_clean/sf_community.csv") 
 ```
 
 # Wrangling
@@ -59,47 +61,13 @@ community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv")
 global_traits_w <- global_traits %>%
   select(2:4, SiteName, Trait, Value) %>% 
   pivot_wider(names_from = Trait, values_from = Value) %>% 
-  
 ```
+
+
 
 # taxonomic data
 ```{r}
 classification <- read_delim("../../1_data/TRY_data/classification.csv", delim = "\t")
-```
-
-# TRY
-```{r}
-#try_data <- rtry_import("../../1_data/TRY_data/42107.txt") %>% 
-#  rtry_remove_dup()
-
-try_summary <- try_data %>% 
-  rtry_explore(TraitName, AccSpeciesName)
-
-num_traits <- try_data %>% 
-  rtry_exclude(ErrorRisk >= 3, baseOn = ObsDataID) %>% # exclude outliers according to error risk
-  rtry_select_row(complete.cases(TraitID) & complete.cases(StdValue)) %>% 
-  rtry_select_col(ObservationID, AccSpeciesID, AccSpeciesName, TraitID, TraitName, StdValue, UnitName)  # remove anciliary data
-  
-
-georef <- try_data %>%
-  rtry_exclude(ErrorRisk >= 3, baseOn = ObsDataID) %>% 
-  rtry_select_anc(59, 60) # keep lon/lat
-
-num_traits_georef <- rtry_join_left(num_traits, georef, baseOn = ObservationID) # add lon/lat to trait data
-
-try_data_w <- rtry_trans_wider(num_traits_georef, names_from = c(TraitID, TraitName, UnitName), values_from = c(StdValue), values_fn = list(StdValue = mean)) # transform to wide 
- 
-try_data_w <- try_data_w %>% 
-   rename(SLA = `3116_Leaf area per leaf dry mass (specific leaf area, SLA or 1/LMA): petiole included_mm2 mg-1`,
-          N = `14_Leaf nitrogen (N) content per leaf dry mass_mg/g`,
-          d15N = `78_Leaf nitrogen (N) isotope signature (delta 15N)_per mill`,
-          C = `13_Leaf carbon (C) content per leaf dry mass_mg/g`,
-          d13C = `89_Leaf carbon isotope signature (delta 13C)_per mill`,
-          CN_ratio = `146_Leaf carbon/nitrogen (C/N) ratio_g g-1`,
-          height = `3106_Plant height vegetative_m`,
-          root_depth = `6_Root rooting depth_m`,
-          root_length = `1079_Root length_cm`, 
-          LDMC = `47_Leaf dry mass per leaf fresh mass (leaf dry matter content, LDMC)_g/g`)
 ```
 
 
@@ -110,12 +78,12 @@ try_data_w <- try_data_w %>%
 ```
 
 ```{r}
-species_traits <- try_data_w %>% 
-  group_by(AccSpeciesName) %>% 
+species_traits <- try_data_filtered %>% 
+  group_by(SpeciesName) %>% 
   summarise(across(c(height, LDMC, SLA, N, d15N, C, d13C, CN_ratio), 
                    ~ mean(.x, na.rm = TRUE), 
                    .names = "{.col}")) %>% 
-  column_to_rownames(var = "AccSpeciesName")
+  column_to_rownames(var = "SpeciesName")
 ```
 
 ```{r}
