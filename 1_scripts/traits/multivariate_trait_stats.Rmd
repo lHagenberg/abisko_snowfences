@@ -64,12 +64,11 @@ spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>%
 # PCA 
 ```{r}
 traits %>% 
-  #select(species, height:CN_ratio) %>% 
   na.omit() %>% 
-  ggpairs(columns = 11:21, 
+  GGally::ggpairs(columns = c(11, 15:21), 
           mapping = aes(color = habitat))
 
-ggsave("3_output/1_figures/traits/variables.tif")
+ggsave("3_output/1_figures/traits/trait_plot_matrix.tif", height = 10, width = 10)
 ```
 
 ## species traits
@@ -258,5 +257,21 @@ ggplot() +
 ggsave("3_output/1_figures/traits/plot_pca.tif", height = 5, width = 6)
 ```
 
+# Change vs PCA
+```{r}
+# calculate biomass differences (sf-ctl) per species per site
+biomass_diff <- community %>% 
+  mutate(site = str_sub(plot, 1, 2)) %>% 
+  #pivot_wider(names_from = treatment, values_from = biomass) %>% 
+  #group_by(habitat, site, spec, group) %>% 
+  #summarise(biomass_diff = sum(snowfence - control, na.rm = TRUE)) %>% 
+  left_join(species_scores)
+```
 
+```{r}
+biomass_diff %>% 
+  filter(part == "leaf") %>% 
+  ggplot(aes(x = PC1, y = hits, color = treatment)) +
+  geom_point()
+```
 

@@ -41,6 +41,7 @@ extr_3 <- function(string) {
 }
 ```
 
+# Data import
 ```{r}
 # import biomass subplot pinpoint data
 biomass_pinpoint <- read.csv("2_data/1_raw/biomass/SF_biomass_pinpoint_2025.csv") %>% 
@@ -54,13 +55,20 @@ biomass_pinpoint <- read.csv("2_data/1_raw/biomass/SF_biomass_pinpoint_2025.csv"
 spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
 ```
 
-
-# Data import
 ```{r}
-biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>% 
+biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>%
   mutate(dweight = as.numeric(dweight)) %>% 
   select(!comment)
 ```
+
+```{r}
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'fen',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  rename(plot = code)
+```
+
 
 # data_cleaning
 ```{r}
@@ -104,6 +112,20 @@ leaf_biomass <- biomass_clean %>%
 stem_biomass <- biomass_clean %>% 
   select(plot, spec, part, dweight) %>% 
   filter(part == "stem")
+```
+
+
+```{r}
+biomass_clean <- biomass_clean %>% 
+  select(!species) %>% 
+  left_join(spec_list) %>% 
+  left_join(plot_data) %>% 
+  select(plot, habitat, site, treatment, spec, species, family, genus, group, part,  dweight) %>% 
+  mutate(across(plot:part, as.factor)) %>% 
+  drop_na(dweight)
+
+biomass_clean %>% 
+  write_csv("2_data/2_clean/biomass/sf_biomass.csv")
 ```
 
 ```{r}

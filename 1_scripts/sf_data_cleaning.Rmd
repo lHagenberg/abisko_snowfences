@@ -19,6 +19,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # setup
 ```{r}
 require(tidyverse)
+require(rtry)
 ```
 
 # data cleaning
@@ -196,6 +197,73 @@ traits_no_chem %>%
   geom_point() + 
   theme(axis.text.x = element_text(angle = 25, hjust = 1))
 ```
+
+## TRY traits
+```{r}
+try_data <- rtry_import("2_data/1_raw/traits/try_data.txt")
+```
+
+```{r}
+#try_data <- rtry_import("../../1_data/TRY_data/42107.txt") %>% 
+#  rtry_remove_dup()
+
+try_summary <- try_data %>% 
+  rtry_explore(TraitName, SpeciesName)
+
+num_traits <- try_data %>% 
+  rtry_exclude(ErrorRisk >= 3, baseOn = ObsDataID) %>% # exclude outliers according to error risk
+  rtry_select_row(complete.cases(TraitID) & complete.cases(StdValue)) %>% 
+  rtry_select_col(ObservationID, AccSpeciesID, SpeciesName, TraitID, TraitName, StdValue, UnitName)  # remove anciliary data
+  
+
+georef <- try_data %>%
+  rtry_exclude(ErrorRisk >= 3, baseOn = ObsDataID) %>% 
+  rtry_select_anc(59, 60) # keep lon/lat
+
+num_traits_georef <- rtry_join_left(num_traits, georef, baseOn = ObservationID) # add lon/lat to trait data
+
+try_data_w <- rtry_trans_wider(num_traits_georef, names_from = c(TraitID, TraitName, UnitName), values_from = c(StdValue), values_fn = list(StdValue = mean)) # transform to wide 
+ 
+try_data_w <- try_data_w %>% 
+   rename(SLA = `3116_Leaf area per leaf dry mass (specific leaf area, SLA or 1/LMA): petiole included_mm2 mg-1`,
+          N = `14_Leaf nitrogen (N) content per leaf dry mass_mg/g`,
+          d15N = `78_Leaf nitrogen (N) isotope signature (delta 15N)_per mill`,
+          C = `13_Leaf carbon (C) content per leaf dry mass_mg/g`,
+          d13C = `89_Leaf carbon isotope signature (delta 13C)_per mill`,
+          CN_ratio = `146_Leaf carbon/nitrogen (C/N) ratio_g g-1`,
+          height = `3106_Plant height vegetative_m`,
+          root_depth = `6_Root rooting depth_m`,
+          root_length = `1079_Root length_cm`, 
+          LDMC = `47_Leaf dry mass per leaf fresh mass (leaf dry matter content, LDMC)_g/g`)
+```
+
+```{r}
+sf_spec <- community %>% 
+  distinct(species) %>% 
+  pull(species)
+
+try_data_filtered <- try_data_w %>% 
+  filter(SpeciesName %in% sf_spec)
+
+try_data_filtered %>% 
+  distinct(SpeciesName) %>% 
+  pull(SpeciesName) %>% 
+  setdiff(sf_spec, .)
+
+try_data_filtered %>% 
+  select(ObservationID, SpeciesName, height, LDMC, SLA, N, d15N, C, d13C, CN_ratio) %>% 
+  mutate(wN = N/10, 
+         wC = C/10, 
+         height = height * 100, 
+         SLA = SLA * 10) %>% 
+  select(!c(N, C)) %>% 
+  pivot_longer(cols = !c(ObservationID, SpeciesName), names_to = "trait", values_to = "trait_value") %>% 
+  na.omit() %>% 
+  rename(species = SpeciesName, 
+         ID = ObservationID) %>% 
+  write.csv("2_data/2_clean/traits/try_traits.csv")
+```
+
 
 # upload to osf
 ```{r}
