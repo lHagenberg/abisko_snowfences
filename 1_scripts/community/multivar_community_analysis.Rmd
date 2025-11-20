@@ -185,9 +185,9 @@ spec_nmds <- total_hits %>%
   filter(score == "species") 
 
 meta_nmds <- hits_nmds %>% 
-  rownames_to_column("code") %>% 
-  right_join(meta_data, hits_nmds, by = "code") %>% 
-  select(code, habitat:treatment, NMDS1, NMDS2) %>% 
+  rownames_to_column("plot_id") %>% 
+  right_join(meta_data, hits_nmds, by = "plot_id") %>% 
+  select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
 
@@ -203,13 +203,17 @@ ggplot() +
   scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
-  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
-  #coord_equal() +
+  annotate("text", x = -1, y = 1.2, label = "stress = 0.115") +
   theme_classic() +
-  theme(legend.position = "bottom",
-        legend.margin = margin(t = -8)) 
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.box = "vertical",     
+        legend.box.just = "left", 
+        legend.spacing.y = unit(0, "cm"), 
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) 
 
-ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width = 5)
+ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width = 4)
 ```
 
 #### analysis

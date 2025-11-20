@@ -89,8 +89,8 @@ all_traits <- bind_rows(try_traits, traits_l)
 
 ```{r}
 facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
-trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
-names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+trait_labs <- c("Plant~height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
+names(trait_labs) <- facet_order
 
 all_traits %>% 
   filter(#spec == "Betnan",
@@ -98,12 +98,15 @@ all_traits %>%
   mutate(trait = factor(trait, levels = facet_order)) %>%
   ggplot(aes(x = group, y = trait_value, fill = treatment)) +
   #geom_violin(trim = FALSE, position = position_dodge(.8),) +
-  geom_boxplot(outliers = FALSE, position = position_dodge(.6), width = .6) +
+  geom_boxplot(outliers = FALSE, position = position_dodge(.8), width = .6) +
   geom_jitter(aes(color = treatment), alpha = 0.2,
-              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.6)) +
-  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) +
+              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8)) +
+  scale_fill_manual(values = c("#ff6666", "#999999", "#4da6ff")) +
+  scale_color_manual(values = c("#ff6666", "#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
+             labeller = as_labeller(trait_labs, label_parsed)) +
   scale_x_discrete(labels=c("dS" = "d. shrubs", "eS" = "e. shrubs", "F" = "forbs", "G" = "graminoids")) +
-  labs(x = "Functional group", y = "Trait value") +
+  labs(x = "Functional group", y = "Trait value", fill = "Dataset", color = "Dataset") +
   theme_classic() +
   theme(panel.spacing = unit(.0, "lines"),
         panel.border = element_rect(color = "black", fill = NA, size = 1),
@@ -112,7 +115,7 @@ all_traits %>%
         strip.background = element_rect(color = "black", size = 1),
         axis.text.x = element_text(angle = 25, hjust = 1))
 
-ggsave("3_output/1_figures/traits/local_global_traits_comparison.tif", height = 6, width = 8)
+ggsave("3_output/1_figures/traits/local_global_traits_comparison.tif", height = 5, width = 8)
 ```
 
 ### model test

@@ -72,7 +72,8 @@ biomass_models <-
 # community composition data (l)
 community <- read_csv("2_data/2_clean/sf_community.csv") %>% 
   filter(spec != "Rholap") %>% 
-  mutate(across(plot:group, ~as.factor(.)))
+  mutate(across(plot:group, ~as.factor(.))) %>% 
+  mutate(site = substr(plot, 1,2))
 ```
 
 ```{r}
@@ -265,17 +266,63 @@ boot_traits_bm %>%
 
 ```{r}
 facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
-trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
-names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+trait_labs <- c("Plant~height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
+names(trait_labs) <- facet_order
 
+# get model outputs (pairwise)
+boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_lm_results.xlsx", sheet = "pair_comparison") %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order),
+         significance = if_else(significance == "", "ns", significance),
+         treatment = "control") %>% 
+  select(trait, habitat, treatment, significance)
+  
+trait_ranges <- boot_traits_bm %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
+  group_by(trait) %>%
+  summarise(
+    trait_min = min(mean, na.rm = TRUE),
+    trait_max = max(mean, na.rm = TRUE),
+    trait_range = trait_max - trait_min,
+    .groups = "drop"
+  )  
+
+sig_positions <- boot_traits_bm %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
+  left_join(trait_ranges, by = "trait") %>%
+  group_by(trait, habitat) %>%
+  summarise(
+    q1 = quantile(mean, 0.25, na.rm = TRUE),
+    q3 = quantile(mean, 0.75, na.rm = TRUE),
+    iqr = q3 - q1,
+    lower_whisker = max(q1 - 1.5 * iqr, min(mean, na.rm = TRUE)),
+    upper_whisker = min(q3 + 1.5 * iqr, max(mean, na.rm = TRUE)),
+    # Use actual max or whisker, whichever is higher
+    y_base = max(upper_whisker, na.rm = TRUE),
+    y_pos = y_base + (trait_range * 0.13),
+    .groups = "drop"
+  ) %>% 
+  left_join(boot_traits_lm) %>% 
+  distinct()
+```
+
+
+```{r}
 boot_traits_bm %>% 
   filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
   mutate(trait = factor(trait, levels = facet_order)) %>%
   mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
   ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
   geom_boxplot() + 
+  geom_text(data = sig_positions, aes(y = y_pos, label = significance), 
+                  position = position_dodge(width = 0)) +
   scale_fill_manual(values = c("#999999", "#4da6ff")) +
-  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))
+  ) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
+             labeller = as_labeller(trait_labs, label_parsed)) + 
   theme_classic() +
   theme(panel.spacing = unit(.0, "lines"),
         panel.border = element_rect(color = "black", fill = NA, size = 1),
@@ -284,8 +331,9 @@ boot_traits_bm %>%
         strip.background = element_rect(color = "black", size = 1),
         axis.text.x = element_text(angle = 25, hjust = 1))
 
-#ggsave("3_output/1_figures/traits/bootstrapped_traits_bmWeighted_2025.tif", height = 4, width = 5)
+ggsave("3_output/1_figures/traits/bootstrapped_traits_bmWeighted_2025.tif", height = 4, width = 5.5)
 ```
+
 
 # Analysis
 ## biomass weighted traits
@@ -411,6 +459,6 @@ addWorksheet(wb, "pair_comparison")
 writeData(wb, "pair_comparison", pair_comps)
 
 # Save the workbook
-saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_lm_results.xls", overwrite = TRUE)
+saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_lm_results.xlsx", overwrite = TRUE)
 ```
 

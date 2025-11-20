@@ -42,7 +42,10 @@ require(ggpubr)
 ```
 # Data import
 ```{r read data}
-community <- read.csv("2_data/2_clean/sf_community.csv")
+community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
+  filter(spec != "Rholap") %>% 
+  mutate(site = substr(plot, 1,2), 
+         across(plot:group, ~as.factor(.)))
 ```
 
 ```{r read data}
@@ -61,7 +64,7 @@ plot_stats <- read_csv("2_data/2_clean/plot_stats_veg_2025.csv") %>%
 ```
 
 
-## Species covers (outdated)
+# Species covers (outdated)
 ```{r}
 covDat <- meta_data %>% 
   cbind(vp_data1)
@@ -88,70 +91,23 @@ summary(fit)$coefficients[8]
 
 write_csv(VAS.cov.change, "3_output/2_results/species_cover_dif_2023.csv")
 ```
-
-# functional type abundances
-```{r }
-plot_stats %>% 
-  filter(part == "leaf") %>% 
-  ggplot(aes(x = group, y = hits, fill = treatment)) +
-  geom_boxplot(outliers = FALSE) +
-  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
-  scale_fill_manual(values = c("#999999", "#4da6ff")) +
-  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
-  theme_classic() +
-  facet_wrap(~ habitat, scales = "free", drop = TRUE, ncol = 3) +
-  labs(x = "Functional type", y = "Leaf hits") +
-  theme(panel.spacing = unit(.0, "lines"),
-        panel.border = element_rect(color = "black", fill = NA, size = 1),
-        legend.position = "bottom",
-        legend.margin = margin(t = -8),
-        axis.text.x = element_text(angle = 25, hjust = 1)
-        )
-
-ggsave("3_output/1_figures/community/sf_type_leaf_hits_25.tif", height = 4, width = 4.5)
-```
-
-```{r }
-plot_stats %>% 
-  group_by(plot, group, treatment, habitat) %>% 
-  summarise(hits = sum(hits)) %>% 
-  ggplot(aes(x = group, y = hits, fill = treatment)) +
-  geom_boxplot(outliers = FALSE) +
-  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
-  scale_fill_manual(values = c("#999999", "#4da6ff")) +
-  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
-  theme_classic() +
-  facet_wrap(~ habitat, scales = "free", drop = TRUE, ncol = 3) +
-  labs(x = "Functional type", y = "Total hits") +
-  theme(panel.spacing = unit(.0, "lines"),
-        panel.border = element_rect(color = "black", fill = NA, size = 1),
-        legend.position = "bottom",
-        legend.margin = margin(t = -8),
-        axis.text.x = element_text(angle = 25, hjust = 1)
-        )
-
-ggsave("3_output/1_figures/community/sf_type_total_hits_25.tif", height = 4, width = 4.5)
-```
-
-### model test
-
+## model test
 ```{r}
 # fit distribution
-d <- plot_stats %>% # there is something strange about this data
-  filter(group == "eS") %>% 
-  filter(part == "leaf") 
+d <- community %>% # there is something strange about this data
+  filter(spec == "Thaalp") 
 dist <- fitdist(d$hits, "nbinom")
 plot(dist)
 ```
 
 ```{r}
 d <- community %>% # there is something strange about this data
-  filter(group == "G") %>% 
+  filter(spec == "Thaalp") %>% 
   filter(part == "leaf") 
 
 #fit <- glm.nb(hits ~ treatment * habitat, data = d) ; AIC(fit) # overdispersed for some groups
 
-fit <- glmer.nb(hits ~ treatment * habitat + (1 | spec), data = d)
+fit <- glm.nb(hits ~ treatment * habitat, data = d)
 
 #fit <- glm(hits ~ treatment * habitat, data = d, family = quasipoisson) # most sensible results, but overdispersed
 
@@ -182,7 +138,211 @@ x <- check_collinearity(fit)
 plot(x); rm(x)
 ```
 
-### linear models
+## model loop
+```{r}
+# exclude species with insufficient data
+model_sp <- community %>% 
+  group_by(spec) %>% 
+  filter(n_distinct(treatment) >= 2) 
+
+sp <- unique(model_sp$spec) %>% 
+  as.character()
+model_list <- list()
+i <- 1
+```
+
+```{r}
+for(i in 1:length(sp)) {
+  key <- sp[i]
+  model_data <- community %>% 
+    filter(spec == key)
+  
+  model_list[[key]] <- tryCatch({
+    glm.nb(hits ~ treatment * habitat, data = model_data)
+  }, error = function(e) {
+    message(paste("Skipping", key, ":", e$message))
+    return(NULL)
+  })
+  
+  rm(model_data, key)
+}
+
+# View a specific model
+summary(model_list[["Betnan"]])
+```
+
+```{r}
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+  # Get R-squared
+   mod_stats <- glance(model) #%>% 
+  #   mutate(significance = case_when(
+  #   p.value < 0.001 ~ "***",
+  #   p.value < 0.01 ~ "**",
+  #   p.value < 0.05 ~ "*",
+  #   p.value < 0.1 ~ ".",
+  #   TRUE ~ ""
+  # ))
+  
+  # Combine with species name
+  bind_cols(group_trait = sp, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+# Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(group_trait = sp) %>% 
+    dplyr::select(group_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+  
+
+# pairwise comparisons 
+pair_comps <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+  # Get R-squared
+  emm <- emmeans(model, ~ treatment | habitat)
+  pair_comp <- pairs(emm, adjust = "tukey") %>%
+    as.data.frame() %>% 
+    mutate(group_trait = sp) %>% 
+    dplyr::select(group_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/community/spec_abundance_glm.nb.xls", overwrite = TRUE)
+```
+
+
+
+# functional type abundances
+```{r }
+plot_stats %>% 
+  filter(part == "leaf") %>% 
+  ggplot(aes(x = group, y = hits, fill = treatment)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  theme_classic() +
+  facet_wrap(~ habitat, scales = "free", drop = TRUE, ncol = 3) +
+  labs(x = "Functional type", y = "Leaf hits") +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        axis.text.x = element_text(angle = 25, hjust = 1)
+        )
+
+ggsave("3_output/1_figures/community/sf_type_leaf_hits_25.tif", height = 4, width = 4.5)
+```
+
+```{r }
+plot_stats %>% 
+  group_by(plot_id, group, treatment, habitat) %>% 
+  summarise(hits = sum(hits)) %>% 
+  ggplot(aes(x = group, y = hits, fill = treatment)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  scale_x_discrete(labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  theme_classic() +
+  facet_wrap(~ habitat, scales = "free", drop = TRUE, ncol = 3) +
+  labs(x = "Functional type", y = "Total hits") +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        axis.text.x = element_text(angle = 25, hjust = 1)
+        )
+
+ggsave("3_output/1_figures/community/sf_type_total_hits_25.tif", height = 4, width = 4)
+```
+
+### model test
+
+```{r}
+# fit distribution
+d <- plot_stats %>% # there is something strange about this data
+  filter(group == "eS") %>% 
+  filter(part == "leaf") 
+dist <- fitdist(d$biomass, "nbinom")
+plot(dist)
+```
+
+```{r}
+d <- community %>% # there is something strange about this data
+  filter(group == "dS") 
+
+#fit <- glm.nb(hits ~ treatment * habitat, data = d) ; AIC(fit) # overdispersed for some groups
+
+#fit <- glmer.nb(hits ~ treatment * habitat + (1 | spec), data = d)
+
+fit <- glmer.nb(hits ~ treatment + (1 | spec) + (1 | site), data = d)
+
+#fit <- glm(hits ~ treatment * habitat, data = d, family = quasipoisson) # most sensible results, but overdispersed
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+anova(fit)
+
+tidy(fit)
+glance(fit)
+r2(fit)
+
+# Get EMMs for each treatment-habitat combo
+emm <- emmeans(fit, ~ treatment)
+pairs(emm, adjust = "tukey") %>%
+  as.data.frame()
+```
+
+```{r trait model diagnostics}
+sim_resid <- simulateResiduals(fittedModel = fit)
+plot(sim_resid)
+testDispersion(sim_resid); rm(sim_resid)
+
+check_singularity(fit, tolerance = 1e-05)
+
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+### model loop
 ```{r}
 groups <- unique(community$group)
 model_list <- list()
@@ -271,9 +431,9 @@ saveWorkbook(wb, "3_output/2_statistics/community/group_leaf_hits_glmer.nb_resul
 
 ```{r}
 # shrubs
-fit <- plot_stats %>% 
-  filter(group == "S") %>% 
-  glmer(hits ~ habitat / treatment + (habitat | site), family = poisson, data = .)
+fit <- community %>% 
+  filter(group == "eS") %>% 
+  glmer.nb(hits ~ habitat * treatment + (1 | site), data = .)
 summary(fit)
 anova(fit)
 

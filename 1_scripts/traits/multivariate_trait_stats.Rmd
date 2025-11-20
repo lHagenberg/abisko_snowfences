@@ -105,23 +105,28 @@ species_scores <- species_scores %>%
 ```
 
 ```{r}
+trait_labs <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
+names(trait_labs) <- c("plant_height", "LDMC", "SLA",  "wN", "d15N", "wC", "d13C", "CN_ratio")
+
 ggplot() +
   geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
   geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = species_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
-  geom_text_repel(data = species_scores, aes(x = PC1, y = PC2, label = species, color = group), size = 4,  alpha = 0.7) +  # add the species labels
-  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  geom_text_repel(data = species_scores, aes(x = PC1, y = PC2, label = species, color = group), size = 3.5,  alpha = 0.7) +  # add the species labels
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait_labs), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
   theme_classic() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
-        strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (38%)", y = "PC2 (21%)", color = "Functional group") 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
+  guides(color = guide_legend(override.aes = list(label = ""))) + 
+  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group") 
   
-
-ggsave("3_output/1_figures/traits/species_pca.tif", height = 5, width = 6)
+ggsave("3_output/1_figures/traits/species_pca.tif", height = 6, width = 6)
 ```
 
 ## traits (with chem)
@@ -149,21 +154,26 @@ site_scores[, 11:12] <- site_scores[, 11:12] * 2.5
 ```
 
 ```{r}
+trait_labs <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
+names(trait_labs) <- c("plant_height", "LDMC", "SLA",  "wN", "d15N", "wC", "d13C", "CN_ratio")
+
 ggplot() +
   geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
   geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = site_scores, aes(x = PC1, y = PC2, color = group), size = 3, stroke = 1, alpha = 0.70) + # add the point markers
-  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait_labs), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
   theme_classic() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
-        strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (40%)", y = "PC2 (18%)") 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
+  labs(x = "PC1 (42%)", y = "PC2 (17%)") 
 
-ggsave("3_output/1_figures/traits/traits_pca.tif", height = 5, width = 6)
+ggsave("3_output/1_figures/traits/traits_pca.tif", height = 6, width = 6)
 ```
 
 ## traits (no chem)
@@ -237,12 +247,15 @@ site_scores <- boot_traits %>%
 ```
 
 ```{r}
+trait_labs <- c("C:N~ratio", "delta^13*C", "delta^15*N", "Plant~height", "LDMC", "SLA", "'%'~C",  "'%'~N")
+names(trait_labs) <- c("CN_ratio", "d13C", "d15N", "height", "LDMC", "SLA", "wC",  "wN")
+
 ggplot() +
   geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
   geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = site_scores, aes(x = PC1, y = PC2, color = habitat, shape = treatment), size = 3, stroke = 1, alpha = .7) + # add the point markers
-  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait_labs), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
   scale_shape_manual(values = c(16, 8)) +
@@ -251,10 +264,15 @@ ggplot() +
   theme_classic() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
-        strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (70%)", y = "PC2 (16%)") 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.box = "vertical",     
+        legend.box.just = "left", 
+        legend.spacing.y = unit(0, "cm"), 
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
+  labs(x = "PC1 (74%)", y = "PC2 (14%)") 
 
-ggsave("3_output/1_figures/traits/plot_pca.tif", height = 5, width = 6)
+ggsave("3_output/1_figures/traits/plot_pca.tif", height = 6, width = 6)
 ```
 
 # Change vs PCA
