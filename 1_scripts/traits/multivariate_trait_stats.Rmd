@@ -171,7 +171,7 @@ ggplot() +
         strip.background = element_rect(color = "black", size = 1),
         legend.position = "bottom",
         legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
-  labs(x = "PC1 (42%)", y = "PC2 (17%)") 
+  labs(x = "PC1 (42%)", y = "PC2 (17%)", color = "Functional group") 
 
 ggsave("3_output/1_figures/traits/traits_pca.tif", height = 6, width = 6)
 ```
@@ -236,14 +236,18 @@ summary(plot_pca)
 
 site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
-trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2])
-trait_scores$trait <- as.factor(rownames(trait_scores))
+trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2]) %>% 
+  mutate(PC1 = PC1 * -1, 
+         PC2 = PC2 * -1)
+trait_scores$trait <- as.factor(rownames(trait_scores)) 
 
 site_scores <- boot_traits %>%
   select(plot:site) %>% 
   unique() %>% 
   rename(ID = plot) %>% 
-  right_join(site_scores)
+  right_join(site_scores) %>% 
+  mutate(PC1 = PC1 * -1, 
+         PC2 = PC2 * -1)
 ```
 
 ```{r}
@@ -270,7 +274,7 @@ ggplot() +
         legend.box.just = "left", 
         legend.spacing.y = unit(0, "cm"), 
         legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
-  labs(x = "PC1 (74%)", y = "PC2 (14%)") 
+  labs(x = "PC1 (75%)", y = "PC2 (14%)") 
 
 ggsave("3_output/1_figures/traits/plot_pca.tif", height = 6, width = 6)
 ```

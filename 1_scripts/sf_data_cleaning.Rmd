@@ -201,6 +201,8 @@ traits_no_chem %>%
 ## TRY traits
 ```{r}
 try_data <- rtry_import("2_data/1_raw/traits/try_data.txt")
+
+community <- read.csv("2_data/2_clean/sf_community.csv")
 ```
 
 ```{r}

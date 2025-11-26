@@ -237,7 +237,7 @@ x <- meta_data %>%
   filter(habitat == "fen")
 
 hits_dist <- total_hits[which(meta_data$habitat == "fen"),] %>% 
-  vegdist()
+  vegdist(method = "bray", na.rm = TRUE)
 
 adonis2(hits_dist ~ x$treatment)
 ```
@@ -249,7 +249,7 @@ x <- meta_data %>%
   filter(habitat == "heath")
 
 hits_dist <- total_hits[which(meta_data$habitat == "heath"),] %>% 
-  vegdist()
+  vegdist(method = "bray", na.rm = TRUE)
 
 adonis2(hits_dist ~ x$treatment)
 ```

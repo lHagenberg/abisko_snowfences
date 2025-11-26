@@ -21,27 +21,33 @@ knitr::opts_chunk$set(echo = TRUE)
 library(openxlsx)
 
 # data handling
-require(tidyverse)
-require(broom)
-require(purrr)
+library(tidyverse)
+library(broom)
+library(purrr)
 
 # visualization
-require(ggplot2)
+library(ggplot2)
 
 # modelling
-require(lme4)
-require(lmerTest)
-require(glmmTMB)
-require(pscl)
+library(lme4)
+library(lmerTest)
+library(glmmTMB)
+library(pscl)
+library(brms)
 
 # model coefficients
-require(emmeans)
-require(MuMIn)
+library(emmeans)
+library(MuMIn)
 
 # model diagnostics
-require(DHARMa)
-require(easystats)
-require(fitdistrplus)
+library(DHARMa)
+library(easystats)
+library(fitdistrplus)
+
+
+library(conflicted)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
 ```
 
 # Data import
@@ -64,19 +70,250 @@ traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>%
 boot_traits <- read_csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv") %>% 
   mutate(across(1:6, as.factor))
 
+# global database
 try_traits <- read_csv("2_data/2_clean/traits/try_traits.csv") %>% 
   select(-...1) 
   
-```
-
-
-```{r}
 # community composition data (l)
-community <- read_csv("2_data/2_clean/sf_community.csv") 
+community <- read_csv("2_data/2_clean/sf_community.csv") %>% 
+  mutate(across(1:10, as.factor))
 ```
 
 
 # Analysis
+## turnover vs. ITV (Leps et al., 2011)
+```{r}
+# fixed averages (CWM using species trait means)
+species_traits <- traits_l %>% 
+  group_by(spec, trait) %>% 
+  summarise(trait_value = mean(trait_value, na.rm = TRUE)) %>% 
+  pivot_wider(names_from = trait, values_from = trait_value)
+
+fix_avg <- community %>% 
+  filter(part == "leaf") %>% 
+  left_join(species_traits) %>% 
+  mutate(height = biomass * height, 
+            LDMC = biomass * LDMC, 
+            SLA = biomass * SLA, 
+            N = biomass * wN, 
+            d15N = biomass * d15N, 
+            C = biomass * wC, 
+            d13C = biomass * d13C, 
+            CN_ratio = biomass * CN_ratio) %>% 
+  group_by(plot) %>% 
+  summarise(biomass = sum(biomass, na.rm = TRUE), 
+            height = sum(height, na.rm = TRUE), 
+            LDMC = sum(LDMC, na.rm = TRUE), 
+            SLA = sum(SLA, na.rm = TRUE), 
+            wN = sum(wN, na.rm = TRUE), 
+            d15N = sum(d15N, na.rm = TRUE), 
+            wC = sum(wC, na.rm = TRUE), 
+            d13C = sum(d13C, na.rm = TRUE), 
+            CN_ratio = sum(CN_ratio, na.rm = TRUE)) %>% 
+  mutate(height = height / biomass, 
+            LDMC = LDMC / biomass, 
+            SLA = SLA / biomass, 
+            wN = wN / biomass, 
+            d15N = d15N / biomass, 
+            wC = wC / biomass, 
+            d13C = d13C / biomass, 
+            CN_ratio = CN_ratio / biomass, 
+         var_type = "landscape")
+
+# specific averages (CWM using plot level traits)
+spec_avg <- community %>% 
+  filter(part == "leaf") %>% 
+  select(plot, spec, hits, biomass) %>% 
+  left_join(traits, by = c("plot", "spec")) %>%  
+  mutate(height = biomass * height, 
+            LDMC = biomass * LDMC, 
+            SLA = biomass * SLA, 
+            wN = biomass * wN, 
+            d15N = biomass * d15N, 
+            wC = biomass * wC, 
+            d13C = biomass * d13C, 
+            CN_ratio = biomass * CN_ratio) %>% 
+  filter(biomass > 0) %>% 
+  group_by(plot) %>% 
+  summarise(biomass = sum(biomass, na.rm = TRUE), 
+            height = sum(height, na.rm = TRUE), 
+            LDMC = sum(LDMC, na.rm = TRUE), 
+            SLA = sum(SLA, na.rm = TRUE), 
+            wN = sum(wN, na.rm = TRUE), 
+            d15N = sum(d15N, na.rm = TRUE), 
+            wC = sum(wC, na.rm = TRUE), 
+            d13C = sum(d13C, na.rm = TRUE), 
+            CN_ratio = sum(CN_ratio, na.rm = TRUE)) %>% 
+  mutate(height = height / biomass, 
+            LDMC = LDMC / biomass, 
+            SLA = SLA / biomass, 
+            wN = wN / biomass, 
+            d15N = d15N / biomass, 
+            wC = wC / biomass, 
+            d13C = d13C / biomass, 
+            CN_ratio = CN_ratio / biomass, 
+         var_type = "local")
+
+ITV <- bind_rows(fix_avg, spec_avg) %>% 
+  select(!biomass) %>% 
+  pivot_longer(cols = height:CN_ratio, names_to = "trait", values_to = "trait_value") %>% 
+  pivot_wider(names_from = var_type, 
+              values_from = trait_value) %>% 
+  mutate(ITV = abs(local - landscape)) %>% 
+  pivot_longer(cols = landscape:ITV, names_to = "var_type", values_to = "CWM") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site_id = as.factor(substr(plot, 1,2))) %>%  # create site variable
+  select(plot, site_id, habitat, treatment, everything())
+```
+
+### model test
+```{r}
+# traits are normally distributed it seems
+spec_avg %>% 
+  pull(CN_ratio) %>% 
+  fitdist("norm") %>% 
+  plot()
+```
+
+```{r}
+# fixed average anova
+fit <- ITV %>% 
+  filter(trait == "CN_ratio", var_type == "landscape") %>% 
+  lm(CWM ~ habitat * treatment, data = .)
+
+summary(fit)
+model_ouptut <- car::Anova(fit, type = "II") %>% 
+  tidy() %>% 
+  mutate(var_type = "landscape") %>% 
+  select(var_type, everything())
+
+# specific average anova
+fit <- ITV %>% 
+  filter(trait == "CN_ratio", var_type == "local") %>% 
+  lm(CWM ~ habitat * treatment, data = .)
+
+summary(fit)
+model_ouptut <- car::Anova(fit, type = "II") %>% 
+  tidy() %>% 
+  mutate(var_type = "local") %>% 
+  select(var_type, everything()) %>% 
+  bind_rows(model_ouptut, .)
+
+# specific average anova
+fit <- ITV %>% 
+  filter(trait == "CN_ratio", var_type == "ITV") %>% 
+  lm(CWM ~ habitat * treatment, data = .)
+
+model_ouptut <- car::Anova(fit, type = "II") %>% 
+  tidy() %>% 
+  mutate(var_type = "ITV") %>% 
+  select(var_type, everything()) %>% 
+  bind_rows(model_ouptut, .)
+
+var_test <- model_ouptut %>% 
+  select(var_type:sumsq) %>% 
+  pivot_wider(id_cols = term, names_from = var_type, values_from = sumsq) %>% 
+  rename(turnover = landscape, 
+         total = local) %>% 
+  mutate(covariation = total - (turnover + ITV)) %>% 
+  select(term, turnover, ITV, covariation, total)
+
+# get variability 
+var_test <- var_test %>%
+  # Summarise every column that is a number
+  summarise(
+    across(turnover:total, sum, na.rm = TRUE),
+    # Manually add a label for the new row (essential for bind_rows)
+    term = "total" 
+  ) %>% 
+  bind_rows(var, .)
+
+# get variablility proportions
+var_prop_test <- var_test %>% 
+  filter(term == "total") %>% 
+  pull(total) %>%
+  {total_val <- .; mutate(var, across(where(is.numeric), ~ .x / total_val))} %>% 
+  mutate(trait = "CN_ratio", .before = "term")
+```
+
+### model loop
+```{r}
+# loop prep
+tr <- unique(ITV$trait)
+vt <- unique(ITV$var_type) 
+
+var_prop <- data.frame()
+i <- 1
+j <- 1
+
+for(i in 1:length(tr)) {
+  key <- tr[i]
+  
+  model_data <- ITV %>%
+    filter(trait == tr[i])
+  
+  model_output <- data.frame() # create model output place holder
+  
+  for(j in 1:length(vt)) {
+    model_data_lvl2 <- model_data %>% 
+      filter(var_type == vt[j])
+    
+    fit <- lm(CWM ~ habitat * treatment, data = model_data_lvl2)
+    
+    x <- car::Anova(fit, type = "II") %>% 
+      tidy() %>% 
+      mutate(var_type = vt[j]) %>% 
+      select(var_type, everything())
+    
+    if (nrow(model_output) == 0) {
+      model_output <- x
+    } else {
+        model_output <- bind_rows(model_output, x)
+      }
+  }
+  
+  var <- model_output %>% 
+    select(var_type:sumsq) %>% 
+    pivot_wider(id_cols = term, names_from = var_type, values_from = sumsq) %>% 
+    rename(turnover = landscape, 
+           total = local) %>% 
+    mutate(covariation = total - (turnover + ITV)) %>% 
+    select(term, turnover, ITV, covariation, total)
+  
+  # get variability 
+  var <- var %>%
+    # Summarise every column that is a number
+    summarise(
+      across(turnover:total, sum, na.rm = TRUE),
+      # Manually add a label for the new row (essential for bind_rows)
+      term = "total" 
+    ) %>% 
+    bind_rows(var, .)
+
+  # get variablility proportions
+  x <- var %>% 
+    filter(term == "total") %>% 
+    pull(total) %>%
+    {total_val <- .; mutate(var, across(where(is.numeric), ~ .x /   total_val))} %>% 
+    mutate(trait = tr[i], .before = "term")
+  
+  if (nrow(var_prop) == 0) {
+      var_prop <- x
+      } else {
+        var_prop <- bind_rows(var_prop, x)
+    }
+}
+
+# cleaning up
+  rm(key, x, i, j, tr, vt)
+```
+
 ## local vs. global
 ```{r}
 try_traits <- try_traits %>% 
@@ -92,10 +329,12 @@ facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"
 trait_labs <- c("Plant~height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
 names(trait_labs) <- facet_order
 
+
 all_traits %>% 
   filter(#spec == "Betnan",
          trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
-  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(trait = factor(trait, levels = facet_order), 
+         treatment = factor(treatment, levels = c("global", "control", "snowfence"))) %>%
   ggplot(aes(x = group, y = trait_value, fill = treatment)) +
   #geom_violin(trim = FALSE, position = position_dodge(.8),) +
   geom_boxplot(outliers = FALSE, position = position_dodge(.8), width = .6) +
@@ -509,4 +748,10 @@ writeData(wb, "pair_comparison", pair_comps)
 saveWorkbook(wb, "3_output/2_statistics/traits/ITV_lm_results.xls", overwrite = TRUE)
 ```
 
+### bayesian test
+```{r}
+# setting prior
+
+brm(formula = height ~ treatment * habitat + (1 | site_id), data = traits, family = gaussian())
+```
 
