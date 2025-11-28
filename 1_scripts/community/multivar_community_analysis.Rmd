@@ -219,7 +219,7 @@ ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width
 #### analysis
 ```{r PERMANOVA}
 total_hits %>% 
-  rownames_to_column("code") %>%
+  rownames_to_column("plot_id") %>%
   inner_join(meta_data, .) %>% 
 adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 9999, method = "bray")
 ```
@@ -286,9 +286,9 @@ spec_nmds <- leaf_bm %>%
   filter(score == "species") 
 
 meta_nmds <- bm_nmds %>% 
-  rownames_to_column("code") %>% 
-  right_join(meta_data, bm_nmds, by = "code") %>% 
-  select(code, habitat:treatment, NMDS1, NMDS2) %>% 
+  rownames_to_column("plot_id") %>% 
+  right_join(meta_data, bm_nmds, by = "plot_id") %>% 
+  select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
 

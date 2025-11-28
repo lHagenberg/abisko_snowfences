@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 require(tidyverse)
 require(rtry)
-```
+``` 
 
 # data cleaning
 ## pinpoint data

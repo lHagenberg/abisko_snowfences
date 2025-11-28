@@ -28,6 +28,8 @@ library(purrr)
 # visualization
 library(ggplot2)
 
+library(traitstrap)
+
 # modelling
 library(lme4)
 library(lmerTest)
@@ -82,6 +84,8 @@ community <- read_csv("2_data/2_clean/sf_community.csv") %>%
 
 # Analysis
 ## turnover vs. ITV (Leps et al., 2011)
+### CWM calculations
+#### manual
 ```{r}
 # fixed averages (CWM using species trait means)
 species_traits <- traits_l %>% 
@@ -172,11 +176,64 @@ ITV <- bind_rows(fix_avg, spec_avg) %>%
   select(plot, site_id, habitat, treatment, everything())
 ```
 
+
+```{r}
+ITV_w <- ITV %>% 
+  pivot_wider(names_from = var_type, values_from = CWM)
+
+ITV %>% 
+  filter(var_type == "local") %>% 
+  ggplot(aes(x = habitat, y = CWM, fill = treatment)) + 
+  geom_boxplot() +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2)
+```
+
+#### bootstrapping
+```{r}
+# use bootstrapped CWMs for specific averages
+spec_avg <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv") %>% 
+  group_by(plot, trait) %>% 
+  summarise(mean = mean(mean)) %>% 
+  pivot_wider(names_from = trait, values_from = mean) %>% 
+  select(!c(dweight, fweight, leafa)) %>% 
+  mutate(var_type = "local")
+```
+
+```{r}
+ITV <- bind_rows(fix_avg, spec_avg) %>% 
+  select(!biomass) %>% 
+  pivot_longer(cols = height:CN_ratio, names_to = "trait", values_to = "trait_value") %>% 
+  pivot_wider(names_from = var_type, 
+              values_from = trait_value) %>% 
+  mutate(ITV = local - landscape) %>% 
+  pivot_longer(cols = landscape:ITV, names_to = "var_type", values_to = "CWM") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site_id = as.factor(substr(plot, 1,2))) %>%  # create site variable
+  select(plot, site_id, habitat, treatment, everything())
+```
+
+```{r}
+ITV_w <- ITV %>% 
+  pivot_wider(names_from = var_type, values_from = CWM)
+
+ITV %>% 
+  filter(var_type == "local") %>% 
+  ggplot(aes(x = habitat, y = CWM, fill = treatment)) + 
+  geom_boxplot() +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2)
+```
+
 ### model test
 ```{r}
 # traits are normally distributed it seems
 spec_avg %>% 
-  pull(CN_ratio) %>% 
+  pull(wC) %>% 
   fitdist("norm") %>% 
   plot()
 ```
@@ -252,6 +309,8 @@ var_prop <- data.frame()
 i <- 1
 j <- 1
 
+ITV_models <- list()
+
 for(i in 1:length(tr)) {
   key <- tr[i]
   
@@ -264,8 +323,11 @@ for(i in 1:length(tr)) {
     model_data_lvl2 <- model_data %>% 
       filter(var_type == vt[j])
     
-    fit <- lm(CWM ~ habitat * treatment, data = model_data_lvl2)
+    model_key <- paste(tr[i], vt[j], sep = "_")
     
+    fit <- lm(CWM ~ habitat * treatment, data = model_data_lvl2)
+    ITV_models[[model_key]] <- fit
+     
     x <- car::Anova(fit, type = "II") %>% 
       tidy() %>% 
       mutate(var_type = vt[j]) %>% 
@@ -278,12 +340,14 @@ for(i in 1:length(tr)) {
       }
   }
   
+  
+  
   var <- model_output %>% 
     select(var_type:sumsq) %>% 
     pivot_wider(id_cols = term, names_from = var_type, values_from = sumsq) %>% 
     rename(turnover = landscape, 
            total = local) %>% 
-    mutate(covariation = total - (turnover + ITV)) %>% 
+    mutate(covariation = total - (turnover - ITV)) %>% 
     select(term, turnover, ITV, covariation, total)
   
   # get variability 
@@ -294,14 +358,14 @@ for(i in 1:length(tr)) {
       # Manually add a label for the new row (essential for bind_rows)
       term = "total" 
     ) %>% 
-    bind_rows(var, .)
+    bind_rows(var, .) %>% 
+    mutate(trait = tr[i], .before = "term")
 
   # get variablility proportions
   x <- var %>% 
     filter(term == "total") %>% 
     pull(total) %>%
-    {total_val <- .; mutate(var, across(where(is.numeric), ~ .x /   total_val))} %>% 
-    mutate(trait = tr[i], .before = "term")
+    {total_val <- .; mutate(var, across(where(is.numeric), ~ .x /   total_val))} 
   
   if (nrow(var_prop) == 0) {
       var_prop <- x
@@ -311,8 +375,91 @@ for(i in 1:length(tr)) {
 }
 
 # cleaning up
-  rm(key, x, i, j, tr, vt)
+rm(model_key, key, x, i, j, tr, vt)
 ```
+
+```{r}
+# get model statistics (goodness of fit)
+model_fit <- map_dfr(names(ITV_models), function(tr_vt) {
+  model <- ITV_models[[tr_vt]]
+  
+  # Get R-squared
+  mod_stats <- glance(model) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+  
+  # Combine with species name
+  bind_cols(var_trait = tr_vt, mod_stats)
+})
+
+# get hypothesis tests
+hyp_test <- map_dfr(names(ITV_models), function(tr_vt) {
+  model <- ITV_models[[tr_vt]]
+  
+# Get model anovas
+  test <- car::Anova(model, type = "II") %>% 
+    tidy() %>% 
+    mutate(var_trait = tr_vt) %>% 
+    dplyr::select(var_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+
+# pairwise comparisons 
+pair_comps <- map_dfr(names(ITV_models), function(tr_vt) {
+  model <- ITV_models[[tr_vt]]
+  
+  # Get R-squared
+  emm <- emmeans(model, ~ treatment * habitat)
+  pair_comp <- pairs(emm, adjust = "tukey") %>%
+    as.data.frame() %>% 
+    mutate(var_trait = tr_vt) %>% 
+    dplyr::select(var_trait, everything()) %>% 
+    mutate(significance = case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    p.value < 0.1 ~ ".",
+    TRUE ~ ""
+  ))
+})
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "model_fit")
+writeData(wb, "model_fit", model_fit)
+
+addWorksheet(wb, "hypothesis_test")
+writeData(wb, "hypothesis_test", hyp_test)
+
+addWorksheet(wb, "pair_comparison")
+writeData(wb, "pair_comparison", pair_comps)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/traits/ITV_lm.xlsx", overwrite = TRUE)
+```
+
+```{r}
+var_prop %>% 
+  filter(term == "total") %>% 
+  select(!total) %>% 
+  pivot_longer(cols = turnover:covariation, names_to = "var_type", values_to = "variance") %>% 
+  ggplot(aes(x = trait, y = variance, fill = var_type)) +
+  geom_col(position = "fill")
+```
+
 
 ## local vs. global
 ```{r}
@@ -451,7 +598,7 @@ get_model_pars <- function(grtr, model_list) {
     dplyr::select(r.squared:p.value) 
   
   # Combine with species name
-  bind_cols(spec = sptr, model_pars, p.vals)
+  bind_cols(spec = grtr, model_pars, p.vals)
 }
 
 results <- map(names(model_list), safely(get_model_pars), model_list = model_list)
@@ -499,8 +646,6 @@ hyp_test <- map_dfr(names(model_list), function(gr_tr) {
     TRUE ~ ""
   ))
 })
-
-  
 
 # pairwise comparisons 
 pair_comps <- map_dfr(names(model_list), function(gr_tr) {
