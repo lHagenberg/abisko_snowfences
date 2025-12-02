@@ -52,7 +52,7 @@ traits <- read_csv("2_data/2_clean/traits/traits_w.csv") %>%
   mutate(across(ID:group, as.factor))
 
 traits_l <- read_csv("2_data/2_clean/traits/traits_l.csv") %>%
-  mutate(across(ID:group, as.factor))
+  mutate(across(ID:trait, as.factor))
 ```
 
 ```{r}
@@ -252,6 +252,8 @@ taxon_col = c("species", "genus", "family"), value_col = "trait_value",
 trait_col = "trait", abundance_col = "biomass", complete_only = TRUE, leaf_id = "ID"
 )
 autoplot(filled_traits_bm)
+
+write_csv(filled_traits_bm, "2_data/2_clean/traits/filled_traits_bmWeighted.csv")
 
 trait_missing(filled_trait = filled_traits_bm, comm = community_biomass)
 

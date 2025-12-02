@@ -157,12 +157,12 @@ write_csv("2_data/2_clean/traits/traits_no_chem_l.csv")
 ```{r}
 traits <- traits_no_chem %>%  # pool data by plot and species
   group_by(plot, spec) %>% 
-  summarise(height = mean(height),
-            dweight = mean(dweight), 
-            fweight = mean(fweight),
-            leafa = mean(leafa), 
-            LDMC = mean(LDMC), 
-            SLA = mean(SLA))
+  summarise(height = mean(height, na.rm = TRUE),
+            dweight = mean(dweight, na.rm = TRUE), 
+            fweight = mean(fweight, na.rm = TRUE),
+            leafa = mean(leafa, na.rm = TRUE), 
+            LDMC = mean(LDMC, na.rm = TRUE), 
+            SLA = mean(SLA, na.rm = TRUE))
 
 traits <- traits_no_chem %>% # add taxonomic variables to pooled dataset
   select(2:10) %>% 

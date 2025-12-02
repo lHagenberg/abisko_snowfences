@@ -99,9 +99,9 @@ fix_avg <- community %>%
   mutate(height = biomass * height, 
             LDMC = biomass * LDMC, 
             SLA = biomass * SLA, 
-            N = biomass * wN, 
+            wN = biomass * wN, 
             d15N = biomass * d15N, 
-            C = biomass * wC, 
+            wC = biomass * wC, 
             d13C = biomass * d13C, 
             CN_ratio = biomass * CN_ratio) %>% 
   group_by(plot) %>% 
@@ -190,6 +190,43 @@ ITV %>%
 
 #### bootstrapping
 ```{r}
+spec_traits_bs <- read.csv("2_data/2_clean/traits/filled_traits_bmWeighted.csv") %>% 
+  group_by(spec_comm, trait) %>% 
+  summarise(trait_value = mean(trait_value)) %>% 
+  rename(spec = spec_comm) %>% 
+  pivot_wider(names_from = trait, values_from = trait_value)
+  
+fix_avg <- community %>% 
+  filter(part == "leaf") %>% 
+  left_join(spec_traits_bs) %>% 
+  mutate(height = biomass * height, 
+            LDMC = biomass * LDMC, 
+            SLA = biomass * SLA, 
+            wN = biomass * wN, 
+            d15N = biomass * d15N, 
+            wC = biomass * wC, 
+            d13C = biomass * d13C, 
+            CN_ratio = biomass * CN_ratio) %>% 
+  group_by(plot) %>% 
+  summarise(biomass = sum(biomass, na.rm = TRUE), 
+            height = sum(height, na.rm = TRUE), 
+            LDMC = sum(LDMC, na.rm = TRUE), 
+            SLA = sum(SLA, na.rm = TRUE), 
+            wN = sum(wN, na.rm = TRUE), 
+            d15N = sum(d15N, na.rm = TRUE), 
+            wC = sum(wC, na.rm = TRUE), 
+            d13C = sum(d13C, na.rm = TRUE), 
+            CN_ratio = sum(CN_ratio, na.rm = TRUE)) %>% 
+  mutate(height = height / biomass, 
+            LDMC = LDMC / biomass, 
+            SLA = SLA / biomass, 
+            wN = wN / biomass, 
+            d15N = d15N / biomass, 
+            wC = wC / biomass, 
+            d13C = d13C / biomass, 
+            CN_ratio = CN_ratio / biomass, 
+         var_type = "landscape")
+
 # use bootstrapped CWMs for specific averages
 spec_avg <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv") %>% 
   group_by(plot, trait) %>% 
@@ -228,6 +265,20 @@ ITV %>%
   geom_boxplot() +
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2)
 ```
+
+```{r}
+ITV_w %>% 
+  ggplot(aes(x = landscape, y = ITV, color = habitat)) + 
+  geom_point() +
+  facet_wrap( ~ trait, scales = "free", nrow = 2, ncol = 4) + 
+  theme_classic() + 
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1))
+```
+
 
 ### model test
 ```{r}
@@ -305,6 +356,7 @@ var_prop_test <- var_test %>%
 tr <- unique(ITV$trait)
 vt <- unique(ITV$var_type) 
 
+vars <- data.frame()
 var_prop <- data.frame()
 i <- 1
 j <- 1
@@ -360,12 +412,19 @@ for(i in 1:length(tr)) {
     ) %>% 
     bind_rows(var, .) %>% 
     mutate(trait = tr[i], .before = "term")
-
+  
+  # get sums of squares
+  if (nrow(vars) == 0) {
+      vars <- var
+      } else {
+        vars <- bind_rows(vars, var)
+      }
+  
   # get variablility proportions
   x <- var %>% 
     filter(term == "total") %>% 
     pull(total) %>%
-    {total_val <- .; mutate(var, across(where(is.numeric), ~ .x /   total_val))} 
+    {total_val <- .; mutate(var, across(where(is.numeric), ~ .x / total_val))} 
   
   if (nrow(var_prop) == 0) {
       var_prop <- x
