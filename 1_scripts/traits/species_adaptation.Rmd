@@ -31,6 +31,7 @@ library(ggplot2)
 library(traitstrap)
 
 # modelling
+library(vegan)
 library(lme4)
 library(lmerTest)
 library(glmmTMB)
@@ -57,6 +58,10 @@ conflict_prefer("filter", "dplyr")
 # taxonomic information
 spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
   mutate(across(1:5, as.factor))
+
+plot_data <- read.xlsx("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  mutate(across(plot:treatment, as.factor)) %>% 
+  select(plot:treatment)
 ```
 
 ```{r data import}
@@ -85,7 +90,6 @@ community <- read_csv("2_data/2_clean/sf_community.csv") %>%
 # Analysis
 ## turnover vs. ITV (Leps et al., 2011)
 ### CWM calculations
-
 #### fixed = landscape
 ```{r}
 spec_traits_bs <- read.csv("2_data/2_clean/traits/filled_traits_bmWeighted.csv") %>% 
@@ -518,8 +522,13 @@ var_prop %>%
   filter(term == "total") %>% 
   select(!total) %>% 
   pivot_longer(cols = turnover:covariation, names_to = "var_type", values_to = "variance") %>% 
+  filter(variance >= 0) %>%
   ggplot(aes(x = trait, y = variance, fill = var_type)) +
-  geom_col(position = "fill")
+  geom_col(position = "fill") + 
+  scale_y_continuous(expand = c(0,0)) + 
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm"))
 ```
 
 #### fixed = habitat
@@ -709,12 +718,12 @@ var_prop %>%
 ### trait.flex
 ```{r}
 x <- spec_avg %>% 
-  select(plot, CN_ratio) %>% 
-  rename(spec.avg = CN_ratio) 
+  select(plot, wC) %>% 
+  rename(spec.avg = wC) 
 
 x <- fix_avg %>% 
-  select(CN_ratio) %>% 
-  rename(fix.avg = CN_ratio) %>% 
+  select(wC) %>% 
+  rename(fix.avg = wC) %>% 
   bind_cols(x, .) %>% 
   mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
     grepl('D', plot), 'fen', ifelse(
@@ -723,15 +732,74 @@ x <- fix_avg %>%
   mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
     grepl('C', plot), 'control', 'snowfence'
     ))) %>%  
-  mutate(site_id = as.factor(substr(plot, 1,2))) %>% 
-  filter(habitat == "fen")
+  mutate(site_id = as.factor(substr(plot, 1,2))) 
 
-x1 <- trait.flex.anova(~ treatment, spec.avg, fix.avg, data = x)
+x1 <- trait.flex.anova(~ habitat * treatment, spec.avg, fix.avg, data = x)
 x1[["RelSumSq"]]
 anova(ITV_models[["fen_CN_ratio_landscape"]])
 
 plot.trait.flex(x1, plot.covar=TRUE, use.percentage=T)
 ```
+### varpart (best)
+```{r}
+tr <- spec_avg %>% # CWM local
+  select(!var_type) %>% 
+  column_to_rownames("plot") %>%
+  colnames()
+
+v <- c("turnover", "ITV", "covariation")
+varpart_r2 <- data.frame()
+
+for(t in 1:length(tr)) {
+  y <- spec_avg %>% # CWM local
+    select(!var_type) %>% 
+    column_to_rownames("plot") %>% 
+    select(t)
+  
+  x1 <- fix_avg %>%  # CWM landscape
+    select(!c(var_type, biomass)) %>% 
+    column_to_rownames("plot") %>% 
+    relocate(tr) %>% 
+    select(t)
+  
+  x2 <- x1 - y # ITV
+    
+  mod <- varpart(y, x1, x2)
+  x <- mod[["part"]][["indfract"]] %>% 
+    slice_head(n = 3) %>% 
+    pull(Adj.R.squared) %>% 
+    data.frame(trait = tr[t], r2 = ., var_part = as.factor(v))
+  
+  if (nrow(varpart_r2) == 0) {
+      varpart_r2 <- x
+      } else {
+        varpart_r2 <- bind_rows(varpart_r2, x)
+      }
+  
+  rm(y, x1, x2, x) # cleaning up
+}
+```
+
+```{r}
+varpart_r2 <- varpart_r2 %>% mutate(trait = factor(trait, levels = c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")), var_part = factor(var_part, levels = c("ITV", "covariation", "turnover")))
+
+trait_labs <- c("Plant~height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+
+varpart_r2 %>% 
+  filter(r2 >= 0) %>%
+  ggplot(aes(x = trait, y = r2, fill = var_part)) +
+  geom_col(position = "fill") + 
+  scale_x_discrete(labels = parse(text = trait_labs)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
+  coord_flip()
+
+write.csv(varpart_r2, "3_output/2_statistics/traits/varpart_r2.csv")
+```
+
 
 ## local vs. global
 ```{r}
