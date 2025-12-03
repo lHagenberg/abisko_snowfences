@@ -22,19 +22,20 @@ script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
 setwd(file.path(script_dir, "..", ".."))
 
 # data handling
-require(tidyverse)
+library(tidyverse)
 
 # analysis
-require(traitstrap)
-require(emmeans)
-require(fitdistrplus)
+library(traitstrap)
+library(emmeans)
+library(fitdistrplus)
 
 # visualization
-require(ggplot2)
+library(ggplot2)
+library(ggpubr)
 
-require(openxlsx)
+library(openxlsx)
 
-require(conflicted)
+library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
@@ -268,7 +269,7 @@ boot_traits_bm %>%
 
 ```{r}
 facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
-trait_labs <- c("Plant~height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
+trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
 names(trait_labs) <- facet_order
 
 # get model outputs (pairwise)
@@ -312,7 +313,7 @@ sig_positions <- boot_traits_bm %>%
 
 
 ```{r}
-boot_traits_bm %>% 
+pa <- boot_traits_bm %>% 
   filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
   mutate(trait = factor(trait, levels = facet_order)) %>%
   mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
@@ -325,15 +326,38 @@ boot_traits_bm %>%
   ) +
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
              labeller = as_labeller(trait_labs, label_parsed)) + 
+  labs(x = "Habitat", y = "Community weighted mean") + 
   theme_classic() +
   theme(panel.spacing = unit(.0, "lines"),
         panel.border = element_rect(color = "black", fill = NA, size = 1),
         legend.position = "bottom",
         legend.margin = margin(t = -8),
+        legend.title = element_blank(),
         strip.background = element_rect(color = "black", size = 1),
         axis.text.x = element_text(angle = 25, hjust = 1))
 
-ggsave("3_output/1_figures/traits/bootstrapped_traits_bmWeighted_2025.tif", height = 4, width = 5.5)
+# add variance partitioning 
+varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
+
+pb <- varpart_r2 %>% 
+  filter(r2 >= 0) %>%
+  ggplot(aes(y = trait, x = r2, fill = var_part)) +
+  geom_col(position = "fill")  + 
+  scale_fill_manual(values = c("#4da6ff", "#999999", "#ff6666")) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") + 
+  labs(y = "Trait", x = parse(text = "R^2")) + 
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8), 
+        legend.title = element_blank(), 
+        axis.title.y.right = element_text(angle = 90), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
+  guides(fill = guide_legend(reverse = TRUE)); pb
+
+ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c(5.5, 2.5))
+
+ggsave("3_output/1_figures/traits/bootstrapped_traits_bmWeighted_2025.tif", height = 4, width = 8)
 ```
 
 
