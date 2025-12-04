@@ -62,11 +62,7 @@ biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>%
 ```
 
 ```{r}
-plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
-  mutate(habitat = case_when(habitat == 'D' ~ 'fen',
-                           habitat == 'E' ~ 'heath',
-                           habitat == "X" ~ 'ridge')) %>% 
-  rename(plot = code)
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") 
 ```
 
 
@@ -512,6 +508,28 @@ totals %>%
 
 ggsave("3_output/1_figures/biomass/sf_leaf_biomass_25.tif", height = 4, width = 4.5)
 ```
+
+```{r}
+community %>% 
+  filter(!is.na(group), 
+         part == "leaf") %>% 
+  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F")))) %>% 
+  ggplot(aes(x = treatment, y = biomass, fill = group)) +
+  geom_col() + 
+  facet_wrap(~ habitat) + 
+  scale_fill_manual(values = rev(c("#667c13", "#53673e", "#8f9043", "#76937d")),
+                    labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  scale_y_continuous(expand = expansion(mult = c(0, .1))) + 
+  labs(y = "Leaf biomass (g. dry weight)", x = "Treatment") + 
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8), 
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 25, hjust = 1), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
+  guides(fill = guide_legend(reverse = TRUE))
+```
+
 
  # PCA of biomass and traits
 ```{r}
