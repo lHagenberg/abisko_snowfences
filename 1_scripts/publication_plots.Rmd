@@ -19,10 +19,11 @@ knitr::opts_chunk$set(echo = TRUE)
 # Setup
 ## packages
 ```{r}
-
 library(vegan)
 
 library(ggplot2)
+library(ggrepel)
+library(ggpubr)
 
 library(tidyverse)
 
@@ -44,7 +45,8 @@ total_hits <- community %>%
   group_by(plot, spec) %>% 
   summarise(total_hits = sum(hits)) %>% 
   pivot_wider(names_from = spec, values_from = total_hits) %>% 
-  column_to_rownames("plot")
+  column_to_rownames("plot") %>% 
+  select_if(negate(function(col) is.numeric(col) && sum(col) < 1))
 
 meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   mutate(site_id = str_sub(plot, 1, 2)) %>% 
@@ -88,6 +90,7 @@ pa <- ggplot() +
   scale_shape_manual(values = c(16, 8)) +
   geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
   annotate("text", x = -1, y = 1.2, label = "stress = 0.115") +
+  xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
   theme_classic() +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1),
@@ -105,7 +108,7 @@ pb <- community %>%
   ggplot(aes(x = treatment, y = biomass, fill = group)) +
   geom_col() + 
   facet_wrap(~ habitat) + 
-  scale_fill_manual(values = rev(c("#667c13", "#53673e", "#8f9043", "#76937d")),
+  scale_fill_manual(values = rev(c("#667c13", "#41532d", "#a3a351", "#6a9174")),
                     labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
   scale_y_continuous(expand = expansion(mult = c(0, .1))) + 
   labs(y = "Leaf biomass (g. dry weight)", x = "Treatment") + 
@@ -221,5 +224,134 @@ pb <- varpart_r2 %>%
 ```{r}
 ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c(5.5, 2.5))
 
-ggsave("3_output/1_figures/publication_ready/trait_means.tif", height = 4, width = 8)
+#ggsave("3_output/1_figures/publication_ready/trait_means.tif", height = 4, width = 8)
 ```
+
+# Fig x. multivariate traits
+```{r}
+boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
+
+plot_traits <- boot_traits_bm %>% 
+  group_by(plot, trait) %>% 
+  summarise(boot_mean = mean (mean)) %>% 
+  pivot_wider(id_cols = plot, names_from = trait, values_from = boot_mean) %>% 
+  column_to_rownames(var = "plot") %>% 
+  select(-c(dweight, fweight, leafa)) 
+
+# PCA
+plot_pca <- plot_traits %>% 
+  scale() %>% 
+  rda()
+
+summary(plot_pca)
+
+site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
+site_scores$ID <- as.factor(rownames(site_scores))
+trait_scores_a <- as.data.frame(plot_pca$CA$v[, 1:2]) %>% 
+  mutate(PC1 = PC1 * -1, 
+         PC2 = PC2 * -1)
+trait_scores_a$trait <- as.factor(rownames(trait_scores_a)) 
+
+site_scores <- boot_traits %>%
+  select(plot:site) %>% 
+  unique() %>% 
+  rename(ID = plot) %>% 
+  right_join(site_scores) %>% 
+  mutate(PC1 = PC1 * -1, 
+         PC2 = PC2 * -1)
+```
+
+```{r}
+trait_labs_a <- c("C:N~ratio", "LDMC", "SLA", "delta^13*C", "delta^15*N", "Plant~height", "'%'~C",  "'%'~N")
+names(trait_labs_a) <- c("CN_ratio", "LDMC", "SLA", "d13C", "d15N", "height", "wC",  "wN")
+
+pa <- ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores_a, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = site_scores, aes(x = PC1, y = PC2, color = habitat, shape = treatment), size = 3, stroke = 1, alpha = .8) + # add the point markers
+  geom_label(data = trait_scores_a, aes(PC1, PC2, label = trait_labs_a), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  scale_shape_manual(values = c(16, 8)) +
+  scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
+  xlim(min(trait_scores_a$PC1) * 1.2, max(trait_scores_a$PC1) * 1.1) +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.box = "vertical",     
+        legend.box.just = "left", 
+        legend.margin = margin(t = -8)) + 
+  labs(x = "PC1 (75%)", y = "PC2 (14%)", color = "Habitat", shape = "Treatment"); pa
+
+#ggsave("3_output/1_figures/traits/plot_pca.tif", height = 6, width = 6)
+```
+
+```{r}
+species_traits <- traits %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) %>% 
+  column_to_rownames(var = "species")
+
+# PCA
+species_pca <- species_traits %>% 
+  scale() %>% 
+  rda()
+
+summary(species_pca)
+
+species_scores <- as.data.frame(species_pca$CA$u[, 1:2])
+species_scores$species <- as.factor(rownames(species_scores))
+trait_scores_b <- as.data.frame(species_pca$CA$v[, 1:2])
+trait_scores_b$trait <- as.factor(rownames(trait_scores_b))
+
+species_scores <- species_scores %>% 
+  left_join(spec_list) %>% 
+  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F")))) 
+
+```
+
+```{r}
+trait_labs_b <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
+names(trait_labs_b) <- c("plant_height", "LDMC", "SLA",  "wN", "d15N", "wC", "d13C", "CN_ratio")
+
+pb <- ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores_b, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = species_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
+  scale_color_manual(values = rev(c("#667c13", "#41532d", "#a3a351", "#6a9174")),
+                    labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
+  geom_text_repel(data = species_scores, aes(x = PC1, y = PC2, label = species, color = group), size = 3.5,  alpha = 0.8) +  # add the species labels
+  geom_label(data = trait_scores_b, aes(PC1, PC2, label = trait_labs_b), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
+  xlim(min(trait_scores_b$PC1) * 1.2, max(trait_scores_b$PC1) * 1.1) +
+  theme_classic() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8)) + 
+  guides(color = guide_legend(override.aes = list(label = ""), reverse = TRUE, nrow = 2)) +
+  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group"); pb
+  
+#ggsave("3_output/1_figures/traits/species_pca.tif", height = 6, width = 6)
+```
+
+```{r}
+ggarrange(pa, pb, ncol = 2, labels = c("a", "b"))
+
+ggsave("3_output/1_figures/publication_ready/multivariate_traits.tif", height = 5, width = 9)
+
+rm(species_scores, site_scores, trait_scores_a, trait_labs_a, trait_scores_b, trait_labs_b) # cleanup
+```
+
