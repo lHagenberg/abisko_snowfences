@@ -20,14 +20,19 @@ knitr::opts_chunk$set(echo = TRUE)
 ## packages
 ```{r}
 library(tidyverse)
+library(broom)
 
 library(vegan)
 library(gllvm)
+library(permute)
+library(RVAideMemoire)
 
 #plotting
 library(ggplot2)
 library(gclus)
 library(corrplot)
+
+conflicted::conflicts_prefer(dplyr::filter)
 ```
 
 
@@ -70,6 +75,7 @@ leaf_bm <- community %>%
   na.omit() %>% 
   select(plot, spec, biomass) %>% 
   pivot_wider(names_from = spec, values_from = biomass) %>% 
+  select(!Rholap) %>% 
   column_to_rownames("plot")
 
 total_hits <- community %>% 
@@ -221,7 +227,7 @@ ggsave("3_output/1_figures/community/hits_NMDS_bray_25.tif", height = 4.5, width
 total_hits %>% 
   rownames_to_column("plot_id") %>%
   inner_join(meta_data, .) %>% 
-adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 9999, method = "bray")
+adonis2(as.matrix(.[, -c(1:4)]) ~ (habitat : treatment) + habitat + treatment, ., permu = 99999, method = "bray")
 ```
 
 
@@ -269,7 +275,6 @@ adonis2(hits_dist ~ x$treatment)
 ### biomass
 ```{r NMDS, include = FALSE}
 bm_dist <- leaf_bm %>% 
-  select(!Rholap) %>% 
   vegdist(method = "bray", na.rm = TRUE)
 
 bm_nmds <- bm_dist %>% 
@@ -278,12 +283,10 @@ bm_nmds <- bm_dist %>%
   filter(score == "sites") %>% 
   select(NMDS1, NMDS2)
   
-spec_nmds <- leaf_bm %>%  
-  select(!Rholap) %>% 
-  na.omit() %>% 
-  metaMDS(distance = "bray") %>% 
-  scores(tidy = TRUE) %>% 
-  filter(score == "species") 
+spec_nmds <- bm_nmds %>% 
+  scores(display = "species") %>% 
+  as.data.frame() %>% 
+  rownames_to_column("species")
 
 meta_nmds <- bm_nmds %>% 
   rownames_to_column("plot_id") %>% 
@@ -291,6 +294,66 @@ meta_nmds <- bm_nmds %>%
   select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
+
+```{r}
+# 1. Run NMDS on raw data (not distance matrix)
+bm_nmds <- leaf_bm %>% 
+  metaMDS(distance = "bray", trymax = 100)
+
+# Check stress
+bm_nmds$stress
+
+# 2. Extract site scores (keep row names!)
+site_nmds <- bm_nmds %>% 
+  scores(display = "sites") %>%  # Don't use tidy = TRUE yet
+  as.data.frame() %>% 
+  rownames_to_column("plot_id")
+
+# 3. Extract species scores
+spec_nmds <- bm_nmds %>% 
+  scores(display = "species") %>% 
+  as.data.frame() %>% 
+  rownames_to_column("species")
+
+# 4. Join with metadata
+meta_nmds <- site_nmds %>% 
+  left_join(meta_data, by = "plot_id") %>%  # Fixed join
+  select(plot_id, habitat, treatment, NMDS1, NMDS2) %>% 
+  na.omit()
+```
+
+```{r}
+# meta_nmds <- c("fen", "heath", "ridge") %>% 
+# map_df(function(h) {
+#   meta_sub <- meta_data %>% 
+#   filter(habitat == h)
+# 
+# bm_nmds <- leaf_bm[rownames(leaf_bm) %in% meta_sub$plot_id, ] %>% 
+#   metaMDS(distance = "bray") %>% 
+#   scores(tidy = TRUE) %>% 
+#   filter(score == "sites") %>% 
+#   select(NMDS1, NMDS2)
+# 
+# meta_nmds <- bm_nmds %>% 
+#   rownames_to_column("plot_id") %>% 
+#   right_join(meta_data, bm_nmds, by = "plot_id") %>% 
+#   select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
+#   na.omit()
+# })
+# 
+# bm_nmds <- leaf_bm %>% 
+#   metaMDS(distance = "bray") %>% 
+#   scores(tidy = TRUE) %>% 
+#   filter(score == "sites") %>% 
+#   select(NMDS1, NMDS2)
+#   
+# spec_nmds <- leaf_bm %>% 
+#   metaMDS(distance = "bray") %>% 
+#   scores(display = "species") %>% 
+#   as.data.frame() %>% 
+#   rownames_to_column("species")
+```
+
 
 ```{r NMDS plot (country), echo = FALSE}
 hull_data <- meta_nmds %>% # find convex hulls
@@ -303,7 +366,7 @@ ggplot() +
   geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
   scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
-  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = species), alpha = 0.5) +  # add the species labels
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   #coord_equal() +
   theme_classic() +
@@ -313,6 +376,57 @@ ggplot() +
 ggsave("3_output/1_figures/community/leaf_bm_NMDS_bray_25.tif", height = 4.5, width = 5)
 ```
 
+#### analysis
+```{r PERMANOVA}
+adonis2(leaf_bm ~ treatment * habitat, data = meta_data, method = "bray")
+
+# 1. Calculate dispersion
+dispersion <- vegdist(y, method = "bray") %>% 
+  betadisper(x$treatment)
+
+# 2. Test if dispersion is significantly different
+permutest(dispersion)
+
+# 3. If significant, see which groups differ in spread
+TukeyHSD(dispersion)
+
+pair_results <- pairwise.adonis(x = dist_matrix, 
+                                factors = metadata$grouping_factor, 
+                                p.adjust.m = "bonferroni")
+```
+
+```{r PERMANOVA meadow}
+# per habitat
+model_fit <- c("fen", "heath", "ridge") %>% 
+map_df(function(h) {
+  x <- meta_data %>% 
+    filter(habitat == h)
+  
+  y <- leaf_bm[rownames(leaf_bm) %in% x$plot_id, ] 
+  
+  fit <- adonis2(y ~ treatment, 
+                 data = x, method = "bray", 
+                 permutations = 9999) %>% 
+    tidy() %>% 
+    mutate(habitat = h, .before = "term")
+})
+
+write_csv(model_fit, "3_output/2_statistics/community/nmds_permanova.csv")
+
+rm(model_fit)
+```
+
+```{r}
+  x <- meta_data %>% 
+    filter(habitat == h)
+  
+  y <- leaf_bm[rownames(leaf_bm) %in% x$plot_id, ] 
+
+dispersion <- vegdist(y, method = "bray") %>% 
+  betadisper(x$treatment)
+permutest(dispersion)
+TukeyHSD(dispersion)
+```
 
 
 # GLLVM

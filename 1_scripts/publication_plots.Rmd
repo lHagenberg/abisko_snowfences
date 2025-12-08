@@ -48,6 +48,14 @@ total_hits <- community %>%
   column_to_rownames("plot") %>% 
   select_if(negate(function(col) is.numeric(col) && sum(col) < 1))
 
+leaf_bm <- community %>%
+  filter(part == "leaf") %>% 
+  na.omit() %>% 
+  select(plot, spec, biomass) %>% 
+  pivot_wider(names_from = spec, values_from = biomass) %>% 
+  select(!Rholap) %>% 
+  column_to_rownames("plot")
+
 meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   mutate(site_id = str_sub(plot, 1, 2)) %>% 
   rename(plot_id = "plot") %>% 
@@ -55,23 +63,24 @@ meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.x
 ```
 
 ```{r NMDS, include = FALSE}
-hits_dist <- total_hits %>% 
+bm_dist <- leaf_bm %>% 
   vegdist(method = "bray", na.rm = TRUE)
 
-hits_nmds <- hits_dist %>% 
+bm_nmds <- bm_dist %>% 
   metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "sites") %>% 
   select(NMDS1, NMDS2)
   
-spec_nmds <- total_hits %>%  
+spec_nmds <- leaf_bm %>%  
+  na.omit() %>% 
   metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "species") 
 
-meta_nmds <- hits_nmds %>% 
+meta_nmds <- bm_nmds %>% 
   rownames_to_column("plot_id") %>% 
-  right_join(meta_data, hits_nmds, by = "plot_id") %>% 
+  right_join(meta_data, bm_nmds, by = "plot_id") %>% 
   select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
@@ -89,8 +98,8 @@ pa <- ggplot() +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_shape_manual(values = c(16, 8)) +
   geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
-  annotate("text", x = -1, y = 1.2, label = "stress = 0.115") +
-  xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
+  annotate("text", x = -1, y = 1.2, label = "stress = 0.091") +
+  #xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
   theme_classic() +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1),
