@@ -73,7 +73,6 @@ bm_nmds <- bm_dist %>%
   select(NMDS1, NMDS2)
   
 spec_nmds <- leaf_bm %>%  
-  na.omit() %>% 
   metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "species") 
@@ -351,7 +350,7 @@ pb <- ggplot() +
         legend.position = "bottom",
         legend.margin = margin(t = -8)) + 
   guides(color = guide_legend(override.aes = list(label = ""), reverse = TRUE, nrow = 2)) +
-  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group"); pb
+  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = NULL); pb
   
 #ggsave("3_output/1_figures/traits/species_pca.tif", height = 6, width = 6)
 ```

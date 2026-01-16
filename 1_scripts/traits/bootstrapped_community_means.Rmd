@@ -26,8 +26,15 @@ library(tidyverse)
 
 # analysis
 library(traitstrap)
+library(lme4); library(nlme); library(glmmTMB)
 library(emmeans)
 library(fitdistrplus)
+
+
+library(broom.mixed)
+
+# model diagnostics
+library(DHARMa)
 
 # visualization
 library(ggplot2)
@@ -380,19 +387,64 @@ plot(dist)
 
 ### model test
 ```{r}
-fit <- lm(height ~ treatment * habitat, data = boot_traits_bm_short)
+fit <- lm(mean ~ treatment * habitat, data = filter(boot_traits_bm, trait == "height")) # heterogeneity of variance
+
+fit <- lmer(mean ~ treatment * habitat + (1 | site), 
+            data = filter(boot_traits_bm, trait == "height")) # still heterogeneity of variance
+
+# separate variance models
+fit1 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ 1,  
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+fit2 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ treatment,  
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+fit3 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ habitat, 
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+fit4 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ treatment + habitat,  
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+fit5 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ treatment * habitat,  
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+AIC(fit1, fit2, fit3, fit4, fit5); rm(fit1, fit2, fit3, fit4, fit5) # fit 5 is best
+
+fit1 <- glmmTMB(mean ~ treatment * habitat,
+                         dispformula = ~ treatment * habitat, 
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+fit2 <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ treatment * habitat,  
+                         family = gaussian(),
+                         data = filter(boot_traits_bm, trait == "height"))
+
+AIC(fit1, fit2) # model with site as random effect = PEAK
 
 summary(fit)
 car::Anova(fit, type = "II") %>% 
   tidy()
-glance(fit)
+glance(fit, conf.int = TRUE)
 
-tidy(fit)
+tidy(fit, conf.int = TRUE)
 
 # Get EMMs for each treatment-habitat combo
 emm <- emmeans(fit, ~ treatment | habitat)
 pairs(emm, adjust = "tukey") %>%
   as.data.frame()
+
+plot(emmeans(fit, ~ treatment | habitat))
 ```
 
 ```{r trait model diagnostics}
@@ -410,25 +462,25 @@ traits <- unique(boot_traits_bm$trait)
 model_list <- list()
 
 for(tr in traits) {
-  model_list[[tr]] <- lm(mean ~ treatment * habitat, 
+  model_list[[tr]] <- glmmTMB(mean ~ treatment * habitat + (1 | site),
+                         dispformula = ~ treatment * habitat,
+                         family = gaussian(), 
                          data = filter(boot_traits_bm, trait == tr))
 }
-
-anova(model_list[["SLA"]])
 
 # get model statistics (goodness of fit)
 model_fit <- map_dfr(names(model_list), function(tr) {
   model <- model_list[[tr]]
   
   # Get R-squared
-  mod_stats <- glance(model) %>% 
-    mutate(significance = case_when(
-    p.value < 0.001 ~ "***",
-    p.value < 0.01 ~ "**",
-    p.value < 0.05 ~ "*",
-    p.value < 0.1 ~ ".",
-    TRUE ~ ""
-  ))
+   mod_stats <- glance(model) #%>%
+  #   mutate(significance = case_when(
+  #   p.value < 0.001 ~ "***",
+  #   p.value < 0.01 ~ "**",
+  #   p.value < 0.05 ~ "*",
+  #   p.value < 0.1 ~ ".",
+  #   TRUE ~ ""
+  # ))
   
   # Combine with species name
   bind_cols(spec = tr, mod_stats)
@@ -485,6 +537,6 @@ addWorksheet(wb, "pair_comparison")
 writeData(wb, "pair_comparison", pair_comps)
 
 # Save the workbook
-saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_lm_results.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", overwrite = TRUE)
 ```
 
