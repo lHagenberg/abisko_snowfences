@@ -73,7 +73,6 @@ bm_nmds <- bm_dist %>%
   select(NMDS1, NMDS2)
   
 spec_nmds <- leaf_bm %>%  
-  na.omit() %>% 
   metaMDS(distance = "bray") %>% 
   scores(tidy = TRUE) %>% 
   filter(score == "species") 
@@ -147,7 +146,7 @@ trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^1
 names(trait_labs) <- facet_order
 
 # get model outputs (pairwise)
-boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_lm_results.xlsx", sheet = "pair_comparison") %>% 
+boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") %>% 
   filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
   mutate(trait = factor(trait, levels = facet_order),
          significance = if_else(significance == "", "ns", significance),
@@ -351,7 +350,7 @@ pb <- ggplot() +
         legend.position = "bottom",
         legend.margin = margin(t = -8)) + 
   guides(color = guide_legend(override.aes = list(label = ""), reverse = TRUE, nrow = 2)) +
-  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group"); pb
+  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = NULL); pb
   
 #ggsave("3_output/1_figures/traits/species_pca.tif", height = 6, width = 6)
 ```
