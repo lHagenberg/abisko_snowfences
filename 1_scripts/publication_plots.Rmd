@@ -146,7 +146,7 @@ trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^1
 names(trait_labs) <- facet_order
 
 # get model outputs (pairwise)
-boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_lm_results.xlsx", sheet = "pair_comparison") %>% 
+boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") %>% 
   filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
   mutate(trait = factor(trait, levels = facet_order),
          significance = if_else(significance == "", "ns", significance),
