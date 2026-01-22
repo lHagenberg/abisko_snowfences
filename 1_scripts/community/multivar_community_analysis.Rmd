@@ -22,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(broom)
 
-library(vegan)
+library(vegan); library(pairwiseAdonis)
 library(gllvm)
 library(permute)
 library(RVAideMemoire)
@@ -33,6 +33,45 @@ library(gclus)
 library(corrplot)
 
 conflicted::conflicts_prefer(dplyr::filter)
+```
+
+## functions
+```{r}
+# Pairwise PERMANOVA function (no installation needed!)
+pairwise_permanova <- function(dist_matrix, factor, permutations = 999) {
+  levels <- unique(factor)
+  n <- length(levels)
+  
+  comparisons <- data.frame(
+    group1 = character(),
+    group2 = character(),
+    R2 = numeric(),
+    F_stat = numeric(),
+    p_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for(i in 1:(n-1)) {
+    for(j in (i+1):n) {
+      keep <- factor %in% c(levels[i], levels[j])
+      sub_dist <- as.dist(as.matrix(dist_matrix)[keep, keep])
+      sub_factor <- droplevels(factor[keep])
+      
+      result <- adonis2(sub_dist ~ sub_factor, permutations = permutations)
+      
+      comparisons <- rbind(comparisons, data.frame(
+        group1 = levels[i],
+        group2 = levels[j],
+        R2 = result$R2[1],
+        F_stat = result$F[1],
+        p_value = result$`Pr(>F)`[1]
+      ))
+    }
+  }
+  
+  comparisons$p_adjusted <- p.adjust(comparisons$p_value, method = "bonferroni")
+  return(comparisons)
+}
 ```
 
 
@@ -378,7 +417,12 @@ ggsave("3_output/1_figures/community/leaf_bm_NMDS_bray_25.tif", height = 4.5, wi
 
 #### analysis
 ```{r PERMANOVA}
-adonis2(leaf_bm ~ treatment * habitat, data = meta_data, method = "bray")
+adonis2(leaf_bm ~ treatment * habitat, strata = meta_data$site_id, data = meta_data, method = "bray") 
+
+x <- meta_data %>% 
+  filter(habitat == "ridge")
+
+y <- leaf_bm[rownames(leaf_bm) %in% x$plot_id, ] 
 
 # 1. Calculate dispersion
 dispersion <- vegdist(y, method = "bray") %>% 
@@ -390,9 +434,24 @@ permutest(dispersion)
 # 3. If significant, see which groups differ in spread
 TukeyHSD(dispersion)
 
-pair_results <- pairwise.adonis(x = dist_matrix, 
-                                factors = metadata$grouping_factor, 
-                                p.adjust.m = "bonferroni")
+# pairwise adonis
+pairAdonis_results <- map_dfr(unique(meta_data$habitat), ~ {
+  x <- meta_data %>% 
+    filter(habitat == .x)  # ← Use .x instead of hab
+  y <- leaf_bm[rownames(leaf_bm) %in% rownames(x), ]
+  
+  pairwise_result <- pairwise.adonis2(y ~ treatment, 
+                                      #strata = meta_data$site_id,
+                                      method = "euclidian", 
+                                      data = x)
+  
+  as.data.frame(pairwise_result) %>%
+    mutate(habitat = .x,  # ← Use .x
+           comparison = rownames(.))
+}) %>%
+  relocate(habitat, comparison)
+
+write.csv(pairAdonis_results, "3_output/2_statistics/community/pairwise_adonis_community.csv", row.names = FALSE)
 ```
 
 ```{r PERMANOVA meadow}

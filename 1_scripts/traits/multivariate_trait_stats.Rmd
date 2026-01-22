@@ -36,6 +36,8 @@ require(ggvegan)
 
 require(corrplot)
 require(gclus)
+
+conflicted::conflicts_prefer(dplyr::filter)
 ```
 
 # Data import
@@ -221,7 +223,7 @@ ggplot() +
 
 ## community traits
 ```{r}
-plot_traits <- boot_traits %>% 
+plot_traits <- boot_traits_bm %>% 
   group_by(plot, trait) %>% 
   summarise(boot_mean = mean (mean)) %>% 
   pivot_wider(id_cols = plot, names_from = trait, values_from = boot_mean) %>% 
@@ -233,7 +235,45 @@ plot_pca <- plot_traits %>%
   rda()
 
 summary(plot_pca)
+```
 
+```{r}
+# extract PCA scores
+pca_scores <- scores(plot_pca, display = "sites", choices = 1:8) %>% 
+  as.data.frame()
+
+# extract and arrange meta data from boot_traits_bm
+pca_meta_data <- boot_traits_bm %>% 
+  select(plot, habitat, site, treatment) %>%  
+  distinct() %>% 
+  filter(plot %in% rownames(plot_traits)) %>% 
+  arrange(match(plot, rownames(plot_traits))) %>%  
+  column_to_rownames(var = "plot")
+
+all(rownames(pca_scores) == rownames(pca_meta_data)) # PCA scores and meta data match!
+
+# PERMANOVA on PCA scores [how many axes?]
+adonis2(pca_scores ~ treatment * habitat, data = pca_meta_data, method = "euclidian")
+
+pairAdonis_results <- map_dfr(unique(pca_meta_data$habitat), ~ {
+  x <- pca_meta_data %>% 
+    filter(habitat == .x)  # ← Use .x instead of hab
+  y <- pca_scores[rownames(x), ]
+  
+  pairwise_result <- pairwise.adonis2(y ~ treatment, 
+                                      method = "euclidian", 
+                                      data = x)
+  
+  as.data.frame(pairwise_result) %>%
+    mutate(habitat = .x,  # ← Use .x
+           comparison = rownames(.))
+}) %>%
+  relocate(habitat, comparison)
+
+write.csv(pairAdonis_results, "3_output/2_statistics/traits/pairwise_adonis_traits.csv", row.names = FALSE)
+```
+
+```{r}
 site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
 trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2]) %>% 
@@ -241,16 +281,14 @@ trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2]) %>%
          PC2 = PC2 * -1)
 trait_scores$trait <- as.factor(rownames(trait_scores)) 
 
-site_scores <- boot_traits %>%
+site_scores <- boot_traits_bm %>%
   select(plot:site) %>% 
   unique() %>% 
   rename(ID = plot) %>% 
   right_join(site_scores) %>% 
   mutate(PC1 = PC1 * -1, 
          PC2 = PC2 * -1)
-```
 
-```{r}
 trait_labs <- c("C:N~ratio", "delta^13*C", "delta^15*N", "Plant~height", "LDMC", "SLA", "'%'~C",  "'%'~N")
 names(trait_labs) <- c("CN_ratio", "d13C", "d15N", "height", "LDMC", "SLA", "wC",  "wN")
 
