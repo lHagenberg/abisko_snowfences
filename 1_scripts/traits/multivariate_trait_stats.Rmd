@@ -22,22 +22,33 @@ script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
 setwd(file.path(script_dir, "..", ".."))
 
 # data handling
-require(tidyverse)
+library(tidyverse)
+library(broom)
+library(purrr)
 
 # analysis
-require(vegan)
-require(gllvm)
+library(vegan)
+library(gllvm)
+library(lme4)
+library(pairwiseAdonis)
+
+# diagnostics
+library(fitdistrplus)
+library(AICcmodavg)
+library(DHARMa)
 
 # visualization
-require(ggplot2)
-require(ggrepel)
-require(ggordiplots)
-require(ggvegan)
+library(ggplot2)
+library(ggrepel)
+library(ggordiplots)
+library(ggvegan)
 
-require(corrplot)
-require(gclus)
+library(corrplot)
+library(gclus)
 
 conflicted::conflicts_prefer(dplyr::filter)
+conflicted::conflicts_prefer(dplyr::select)
+conflicted::conflicts_prefer(AICcmodavg::AICc)
 ```
 
 # Data import
@@ -96,15 +107,36 @@ species_pca <- species_traits %>%
 
 summary(species_pca)
 
-species_scores <- as.data.frame(species_pca$CA$u[, 1:2])
-species_scores$species <- as.factor(rownames(species_scores))
-trait_scores <- as.data.frame(species_pca$CA$v[, 1:2])
-trait_scores$trait <- as.factor(rownames(trait_scores))
-
-species_scores <- species_scores %>% 
+# extract PCA scores
+species_scores <- scores(species_pca, display = "sites", choices = 1:2) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("species") %>% 
   left_join(spec_list)
 
+trait_scores <- scores(species_pca, display = "species", choices = 1:2) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("trait")
+
+
 ```
+
+```{r}
+species_pca %>% 
+  eigenvals() %>% 
+  {. / sum(.)} %>% 
+  mean(); summary(species_pca) # PC1, PC2 and PC3 are larger than the mean
+
+eigenvals(species_pca); bstick(species_pca) # only PC1 significant according to broken stick values
+
+scores(species_pca, display = "sites", choices = 1:8) %>% 
+  cor() # no redundancy between PC1 and PC2
+```
+
+### ANOVA on PCA scores
+```{r}
+
+```
+
 
 ```{r}
 trait_labs <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
@@ -239,7 +271,7 @@ summary(plot_pca)
 
 ```{r}
 # extract PCA scores
-pca_scores <- scores(plot_pca, display = "sites", choices = 1:8) %>% 
+plot_scores <- scores(plot_pca, display = "sites", choices = 1:8) %>% 
   as.data.frame()
 
 # extract and arrange meta data from boot_traits_bm
@@ -250,15 +282,19 @@ pca_meta_data <- boot_traits_bm %>%
   arrange(match(plot, rownames(plot_traits))) %>%  
   column_to_rownames(var = "plot")
 
-all(rownames(pca_scores) == rownames(pca_meta_data)) # PCA scores and meta data match!
+all(rownames(plot_scores) == rownames(pca_meta_data)) # PCA scores and meta data match!
 
 # PERMANOVA on PCA scores [how many axes?]
-adonis2(pca_scores ~ treatment * habitat, data = pca_meta_data, method = "euclidian")
+x <- pca_meta_data %>% 
+  filter(habitat == "ridge")
+y <- plot_scores[rownames(x), ]
+adonis2(y ~ treatment, data = x, 
+        method = "euclidian", by = "terms")
 
 pairAdonis_results <- map_dfr(unique(pca_meta_data$habitat), ~ {
   x <- pca_meta_data %>% 
     filter(habitat == .x)  # ← Use .x instead of hab
-  y <- pca_scores[rownames(x), ]
+  y <- plot_scores[rownames(x), ]
   
   pairwise_result <- pairwise.adonis2(y ~ treatment, 
                                       method = "euclidian", 
@@ -274,21 +310,99 @@ write.csv(pairAdonis_results, "3_output/2_statistics/traits/pairwise_adonis_trai
 ```
 
 ```{r}
-site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
-site_scores$ID <- as.factor(rownames(site_scores))
-trait_scores <- as.data.frame(plot_pca$CA$v[, 1:2]) %>% 
+plot_pca %>% 
+  eigenvals() %>% 
+  {. / sum(.)} %>% 
+  mean(); summary(plot_pca) # PC1 and PC2 are larger than the mean
+
+eigenvals(plot_pca); bstick(plot_pca) # only PC1 significant according to broken stick values
+
+cor(plot_scores) # no redundancy between PC1 and PC2
+```
+
+### ANOVA on PCA scores
+```{r}
+site_scores <- scores(plot_pca, display = "sites", choices = 1:2) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("plot")
+
+trait_scores <- scores(plot_pca, display = "species", choices = 1:2) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("trait") %>% 
   mutate(PC1 = PC1 * -1, 
          PC2 = PC2 * -1)
-trait_scores$trait <- as.factor(rownames(trait_scores)) 
 
 site_scores <- boot_traits_bm %>%
   select(plot:site) %>% 
   unique() %>% 
-  rename(ID = plot) %>% 
   right_join(site_scores) %>% 
   mutate(PC1 = PC1 * -1, 
          PC2 = PC2 * -1)
+```
+ 
+```{r}
+# Modelling PCA scores
+y <- site_scores %>% 
+  filter(habitat == "heath")
 
+dist <- fitdist(y$PC2, "norm")
+plot(dist)
+
+fit <- lm(PC1 ~ treatment, data = y); AICc(fit)
+
+fit <- lm(PC2 ~ treatment, data = y); AICc(fit)
+
+# fit <- site_scores %>% 
+#   lmer(PC1 ~ treatment + (1 | site), data = .); AICc(fit)
+
+# fit <- site_scores %>%
+#   lmer(PC1 ~ habitat * treatment + (1 | site), data = .); AICc(fit)
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+
+emm <- emmeans(fit, ~ treatment | habitat)
+pairs(emm, adjust = "tukey") %>%
+  as.data.frame()
+
+plot(emmeans(fit, ~ treatment | habitat))
+```
+
+```{r}
+PC_anovas <- map_dfr(unique(site_scores$habitat), ~ {
+  y <- site_scores %>%
+    filter(habitat == .x)
+  
+  fit1 <- lm(PC1 ~ treatment, data = y); AICc(fit)
+  model_output <-  car::Anova(fit1, type = "II") %>%
+    tidy() %>% 
+    mutate(PC = "PC1")
+  
+  fit2 <- lm(PC2 ~ treatment, data = y); AICc(fit)
+  model_output <-  car::Anova(fit2, type = "II") %>%
+    tidy() %>% 
+    mutate(PC = "PC2") %>% 
+    bind_rows(model_output, .)
+  
+  model_output %>% 
+    mutate(habitat = .x) %>% 
+    relocate(habitat, PC)
+}); PC_anovas
+```
+
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = fit)
+plot(simulationOutput)
+testDispersion(simulationOutput); rm(simulationOutput)
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+
+```{r}
 trait_labs <- c("C:N~ratio", "delta^13*C", "delta^15*N", "Plant~height", "LDMC", "SLA", "'%'~C",  "'%'~N")
 names(trait_labs) <- c("CN_ratio", "d13C", "d15N", "height", "LDMC", "SLA", "wC",  "wN")
 
@@ -316,6 +430,12 @@ ggplot() +
 
 ggsave("3_output/1_figures/traits/plot_pca.tif", height = 6, width = 6)
 ```
+
+# RDA
+```{r}
+
+```
+
 
 # Change vs PCA
 ```{r}
