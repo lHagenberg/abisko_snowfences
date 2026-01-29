@@ -26,6 +26,8 @@ library(gt)
 library(gtExtras)
 library(bayestestR)
 library(emmeans)
+
+library(openxlsx)
 ```
 
 ## Data
@@ -51,15 +53,16 @@ leaf_bm <- community %>%
   summarise(total_bm = sum(biomass)) %>% 
   ungroup() %>% 
   left_join(plot_data) %>% 
-  relocate(habitat:treatment, .after = plot)# %>% 
-  #filter(total_bm > 0) # remove 0
+  relocate(habitat:treatment, .after = plot)
 
 # subset lists 
 plot_bm_ls <- leaf_bm %>% 
-  mutate(across(where(is.numeric), ~ ifelse(.x == 0, 0.0001, .x)))%>% 
+  mutate(across(where(is.numeric),
+                ~ ifelse(.x == 0, 0.0001, .x))) %>% # replace 0 (for gamma)
   pivot_wider(names_from = group, values_from = total_bm) %>% 
   mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
-  group_split(habitat)
+  group_split(habitat) %>%
+  set_names(unique(leaf_bm$habitat))
 
 plot_bm_ls[[1]]
 ```
@@ -67,15 +70,6 @@ plot_bm_ls[[1]]
 # Plot level statistics
 
 Statistics at a plot level with brms (bayesian statistics). Chosen due to low sample size
-
-## Biomass
-
-```{r}
-leaf_bm %>% 
-  ggplot(aes(x = treatment, y = total_bm)) + 
-  geom_point() +
-  facet_wrap(~habitat * group, scales = "free_y")
-```
 
 ```{r model_brms, warning=FALSE,message=F}
 #| echo: false
@@ -138,7 +132,6 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
   # summarise diagnoistics in one table
   diag <- tibble(
     habitat = hbt_name,
-    # layer = layer,
     group = growth_form,
     n_divergent = sum(model$fit@sim$sampler_diagnostics[, "divergent__"]),
     max_Rhat     = max(summary(model)$fixed[, "Rhat"]),
@@ -164,7 +157,6 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
                  values_to = "value") %>%
     mutate(
       habitat = hbt_name,
-      # layer = layer,
       group = growth_form
     )
 
@@ -210,9 +202,7 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
   results <- bind_cols(raw_summary, post_summary) %>%
     mutate(
       habitat = hbt_name,
-      # layer = layer,
       group = growth_form,
-      # mean = sprintf("%.4f ± %.4f", total_mean, total_sd),
       control   = sprintf("%.4f ± %.4f", ctl_mean, ctl_sd),
       snowfence = sprintf("%.4f ± %.4f", sf_mean, sf_sd),
       mean_diff = sprintf("%.4f", post_mean_diff),
@@ -234,38 +224,97 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
     results        = results
   )
 }
+```
 
+```{r}
 # -----------------------
 # SHOW RESULTS FUNCTIONS
 # -----------------------
+view_results <- function(all_results){
+  results <- bind_rows(
+  lapply(seq_along(all_results), function(i) {
+    all_results[[i]]$results %>% mutate(dataset = i)
+    })
+  )
+  View(results)
+}
 
-# view_results <- function(all_results){
-#   results <- bind_rows(
-#   lapply(seq_along(all_results), function(i) {
-#     all_results[[i]]$results %>% mutate(dataset = i)
-#     })
-#   )
-#   View(results)
-# }
-# view_diagnostics <- function(all_results){
-#   results <- bind_rows(
-#   lapply(seq_along(all_results), function(i) {
-#     all_results[[i]]$diagnostics %>% mutate(dataset = i)
-#     })
-#   )
-#   View(results)
-# }
+view_diagnostics <- function(all_results){
+  results <- bind_rows(
+  lapply(seq_along(all_results), function(i) {
+    all_results[[i]]$diagnostics %>% mutate(dataset = i)
+    })
+  )
+  View(results)
+}
+```
+
+## Biomass
+
+```{r}
+leaf_bm %>% 
+  ggplot(aes(x = treatment, y = total_bm)) + 
+  geom_point() +
+  facet_wrap(~ habitat * group, scales = "free")
 ```
 
 ```{r}
 gr_frms <- colnames(plot_bm_ls[[1]][,sapply(plot_bm_ls[[1]],is.numeric)])
+brm_fit_ls <- list()
 
-all_results <- map_dfr(plot_bm_ls, function(d) {
-  # For each dataset, test all variables
-  map_dfr(gr_frms, function(var) {
-    fit_model(d, growth_form = var)$results
-  })
-})
+for(gr_frm in gr_frms) {
+    fit_name <- paste0(gr_frm, "_fit")
+    
+    brm_fit_list[[fit_name]] <- lapply(plot_bm_ls, function(d) {
+      fit_model(d, growth_form = gr_frm)
+    })
+}
+```
 
-View(all_results)
+### Export
+
+```{r}
+# model statistics
+bm_brm_results <- map_dfr(names(brm_fit_ls), function(fit_name) {
+  map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
+    habitat_result$results
+  }) 
+}) %>% arrange(habitat, group)
+
+# model diagnostics
+bm_brm_diagn <- map_dfr(names(brm_fit_ls), function(fit_name) {
+  map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
+    habitat_result$diagnostics
+  }) 
+}) %>% arrange(habitat, group)
+
+# marginal posteriors
+bm_brm_est <- map_dfr(names(brm_fit_ls), function(fit_name) {
+  map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
+    habitat_result$epred_summary
+  }) 
+}) %>% arrange(habitat, group)
+
+# # model full posteriors
+# bm_brm_post <- map_dfr(names(brm_fit_ls), function(fit_name) {
+#   map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
+#     habitat_result$posterior_long
+#   }) 
+# })  
+```
+
+```{r}
+# write results to excel file
+wb <- createWorkbook()
+addWorksheet(wb, "statistics")
+writeData(wb, "statistics", bm_brm_results); rm(bm_brm_results)
+
+addWorksheet(wb, "diagnostics")
+writeData(wb, "diagnostics", bm_brm_diagn); rm(bm_brm_diagn)
+
+addWorksheet(wb, "marginal_estimates")
+writeData(wb, "marginal_estimates", bm_brm_est); rm(bm_brm_est)
+
+# Save the workbook
+saveWorkbook(wb, "3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", overwrite = TRUE); rm(wb)
 ```
