@@ -1,0 +1,271 @@
+---
+title: "plot_level_bayes_stats"
+author: "Liyenne Hagenberg"
+format: html
+editor: visual
+---
+
+# Setup
+
+## Packages
+
+```{r}
+library(readr); library(readxl)
+
+library(tidyverse)
+library(purrr)
+library(broom)
+
+library(ggplot2)
+library(RColorBrewer)
+
+library(brms)
+library(tidybayes)
+library(gt)
+
+library(gtExtras)
+library(bayestestR)
+library(emmeans)
+```
+
+## Data
+
+### Import
+
+```{r}
+# community data
+community <- read_csv("2_data/2_clean/sf_community.csv")
+
+# plot data
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  select(plot:treatment)
+```
+
+### Wrangling
+
+```{r}
+leaf_bm <- community %>% 
+  filter(part == "leaf") %>%
+  na.omit() %>% 
+  group_by(plot, group) %>% 
+  summarise(total_bm = sum(biomass)) %>% 
+  ungroup() %>% 
+  left_join(plot_data) %>% 
+  relocate(habitat:treatment, .after = plot)# %>% 
+  #filter(total_bm > 0) # remove 0
+
+# subset lists 
+plot_bm_ls <- leaf_bm %>% 
+  mutate(across(where(is.numeric), ~ ifelse(.x == 0, 0.0001, .x)))%>% 
+  pivot_wider(names_from = group, values_from = total_bm) %>% 
+  mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
+  group_split(habitat)
+
+plot_bm_ls[[1]]
+```
+
+# Plot level statistics
+
+Statistics at a plot level with brms (bayesian statistics). Chosen due to low sample size
+
+## Biomass
+
+```{r}
+leaf_bm %>% 
+  ggplot(aes(x = treatment, y = total_bm)) + 
+  geom_point() +
+  facet_wrap(~habitat * group, scales = "free_y")
+```
+
+```{r model_brms, warning=FALSE,message=F}
+#| echo: false
+# options(brms.backend = NULL) <- NEVER PLAY WITH THIS AGAIN!
+fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
+
+  hbt_name  <- unique(d$habitat)
+  # layer     <- unique(d$sample)
+
+  # -----------------------
+  # RAW SUMMARY
+  # -----------------------
+  raw_summary <- d %>%
+    
+    # mean and sd for each treatment
+    group_by(treatment) %>%
+    summarise(
+      raw_mean = mean(.data[[growth_form]], na.rm = TRUE),
+      raw_sd   = sd(.data[[growth_form]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+  
+    pivot_wider(
+      names_from = treatment,
+      values_from = c(raw_mean, raw_sd)
+    ) %>%
+    rename(
+      ctl_mean   = raw_mean_control, 
+      ctl_sd     = raw_sd_control,
+      sf_mean    = raw_mean_snowfence,
+      sf_sd      = raw_sd_snowfence,
+    )
+
+
+  # -----------------------
+  # MODEL FORMULA
+  # -----------------------
+  
+  # used to have varying growth_forms
+  formula <- as.formula(paste0(growth_form, " ~ treatment + (1 | site)"))
+
+  # -----------------------
+  # FIT MODEL
+  # -----------------------
+  model <- brm(
+    formula = formula,
+    data = d,
+    family = Gamma(link = "log"), # assume normal
+    chains = 2, cores = 2, # rerun later with 4x4
+    iter = 8000, warmup = 2000, # increase to improve "convergence"
+    backend = "rstan",
+    control = list(adapt_delta = 0.95, max_treedepth = 15),
+    refresh = if (quiet) 0 else 100
+  )
+
+  # -----------------------
+  # DIAGNOSTICS
+  # -----------------------
+  
+  # summarise diagnoistics in one table
+  diag <- tibble(
+    habitat = hbt_name,
+    # layer = layer,
+    group = growth_form,
+    n_divergent = sum(model$fit@sim$sampler_diagnostics[, "divergent__"]),
+    max_Rhat     = max(summary(model)$fixed[, "Rhat"]),
+    min_bulk_ESS = min(summary(model)$fixed[, "Bulk_ESS"]),
+    min_tail_ESS = min(summary(model)$fixed[, "Tail_ESS"])
+  )
+
+  # -----------------------
+  # POSTERIOR DRAWS
+  # -----------------------
+  
+  # collect posteriors in one table
+  draws <- spread_draws(model, b_Intercept, b_treatmentsnowfence) %>%
+    mutate(
+      control = exp(b_Intercept),
+      treatment   = exp(b_Intercept + b_treatmentsnowfence)
+    )
+
+  posterior_long <- draws %>%
+    select(.draw, control, treatment) %>%
+    pivot_longer(c(control, treatment),
+                 names_to = "treatment",
+                 values_to = "value") %>%
+    mutate(
+      habitat = hbt_name,
+      # layer = layer,
+      group = growth_form
+    )
+
+  # -----------------------
+  # MARGINAL POSTERIOR MEANS (E[y])
+  # -----------------------
+  
+  # summarise predictions for plots
+  epred_summary <- posterior_long %>%
+    group_by(treatment, habitat, group) %>%
+    median_qi(value, .width = 0.95)
+
+
+  # -----------------------
+  # POSTERIOR SUMMARY TABLE
+  # -----------------------
+  
+  # collect summary of data
+  post_summary <- draws %>%
+    summarise(
+      post_mean_diff = mean(treatment - control),
+      lower_cred     = quantile(treatment - control, 0.025),
+      upper_cred     = quantile(treatment - control, 0.975),
+      prob_increase  = mean(treatment > control),
+      prob_decrease  = mean(treatment < control),
+      bf             = prob_increase / prob_decrease
+    )
+  
+  # posterior difference vector
+  diff_vals <- draws$treatment - draws$control
+
+  # Compute pd
+  pd_val   <- pd(diff_vals)$pd
+  
+  
+  # compute ROPE
+  sd_diff <- sd(diff_vals)
+  rope_bounds <- c(-1, 1) * sd_diff
+  rope_val <- rope(diff_vals, range = rope_bounds)
+
+
+  # bind results
+  results <- bind_cols(raw_summary, post_summary) %>%
+    mutate(
+      habitat = hbt_name,
+      # layer = layer,
+      group = growth_form,
+      # mean = sprintf("%.4f ± %.4f", total_mean, total_sd),
+      control   = sprintf("%.4f ± %.4f", ctl_mean, ctl_sd),
+      snowfence = sprintf("%.4f ± %.4f", sf_mean, sf_sd),
+      mean_diff = sprintf("%.4f", post_mean_diff),
+      CI_low        = sprintf("%.4f", lower_cred),
+      CI_high       = sprintf("%.4f", upper_cred),
+      pd = sprintf("%.3f",pd_val),
+      rope_pct = sprintf("%.4f", rope_val)
+    ) %>%
+    select(habitat, group, control, snowfence,
+           mean_diff, CI_low, CI_high, pd, rope_pct)
+
+  # -----------------------
+  # RETURN RESULTS
+  # -----------------------
+  list(
+    posterior_long = posterior_long,
+    epred_summary  = epred_summary,
+    diagnostics    = diag,
+    results        = results
+  )
+}
+
+# -----------------------
+# SHOW RESULTS FUNCTIONS
+# -----------------------
+
+# view_results <- function(all_results){
+#   results <- bind_rows(
+#   lapply(seq_along(all_results), function(i) {
+#     all_results[[i]]$results %>% mutate(dataset = i)
+#     })
+#   )
+#   View(results)
+# }
+# view_diagnostics <- function(all_results){
+#   results <- bind_rows(
+#   lapply(seq_along(all_results), function(i) {
+#     all_results[[i]]$diagnostics %>% mutate(dataset = i)
+#     })
+#   )
+#   View(results)
+# }
+```
+
+```{r}
+gr_frms <- colnames(plot_bm_ls[[1]][,sapply(plot_bm_ls[[1]],is.numeric)])
+
+all_results <- map_dfr(plot_bm_ls, function(d) {
+  # For each dataset, test all variables
+  map_dfr(gr_frms, function(var) {
+    fit_model(d, growth_form = var)$results
+  })
+})
+
+View(all_results)
+```

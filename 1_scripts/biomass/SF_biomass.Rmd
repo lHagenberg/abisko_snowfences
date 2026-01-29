@@ -17,18 +17,28 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Setup
-## packages
-```{r}
-require(broom)
-require(purrr)
-require(tidyverse)
-require(openxlsx)
 
-require(conflicted)
+## packages
+
+```{r}
+library(broom)
+library(purrr)
+library(tidyverse)
+library(openxlsx)
+
+library(glmmTMB)
+library(brms)
+library(tidybayes)
+library(bayestestR)
+library(bayesplot)
+
+library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
+
 ## functions
+
 ```{r}
 extr_3 <- function(string) {
   # Split the string into words
@@ -42,6 +52,7 @@ extr_3 <- function(string) {
 ```
 
 # Data import
+
 ```{r}
 # import biomass subplot pinpoint data
 biomass_pinpoint <- read.csv("2_data/1_raw/biomass/SF_biomass_pinpoint_2025.csv") %>% 
@@ -62,11 +73,12 @@ biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>%
 ```
 
 ```{r}
-plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") 
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  select(plot:treatment)
 ```
 
-
 # data_cleaning
+
 ```{r}
 emp_biomass <- biomass %>% 
   filter(species == "Empetrum nigrum") %>%
@@ -109,7 +121,6 @@ stem_biomass <- biomass_clean %>%
   select(plot, spec, part, dweight) %>% 
   filter(part == "stem")
 ```
-
 
 ```{r}
 biomass_clean <- biomass_clean %>% 
@@ -160,7 +171,145 @@ biomass_pinpoint %>%
 ```
 
 # biomass modelling
+
 ## leaf biomass
+
+```{r}
+leaf_bm <- community %>% 
+  filter(part == "leaf") %>%
+  na.omit() %>% 
+  group_by(plot, group) %>% 
+  summarise(total_bm = sum(biomass)) %>% 
+  left_join(plot_data) %>% 
+  relocate(habitat:treatment, .after = plot) %>% 
+  filter(total_bm > 0) # remove 0
+```
+
+### model test
+
+```{r}
+y <- leaf_bm %>% 
+  filter(habitat == "fen", 
+         group == "eS") #%>% 
+  # group_by(plot) %>% 
+  # summarise(total_bm = sum(total_bm), 
+  #           habitat = first(habitat),      # Take first value (all same)
+  #   treatment = first(treatment),
+  #   site = first(site))
+
+dist <- fitdist(y$total_bm, "gamma")
+plot(dist)
+
+```
+
+```{r}
+fit <- glmmTMB(total_bm ~ treatment, data = y, family = Gamma); AICc(fit) # too few unique datapoints
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+
+# diagnostics
+simulationOutput <- simulateResiduals(fittedModel = fit)
+plot(simulationOutput)
+testDispersion(simulationOutput); rm(simulationOutput)
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+#### brms
+
+```{r}
+ggplot(y, aes(x = treatment, y = total_bm, group = site)) +
+  geom_point(size = 3) +
+  geom_line(aes(color = site)) +  # Lines connect pairs
+  scale_y_log10() +
+  labs(title = "Paired design: each line is one site",
+       subtitle = "Treatment effect within sites")
+```
+
+```{r}
+model_subset <- brm(
+  total_bm ~ treatment + (1|site),  # Site captures pairing
+  data = y,
+  family = Gamma(link = "log"),
+  # prior = c(
+  #   prior(normal(0, 2), class = "Intercept"),
+  #   prior(normal(0, 1), class = "b"),           # Treatment effect
+  #   prior(exponential(1), class = "sd"),         # Between-site variation
+  #   prior(gamma(2, 0.1), class = "shape")
+  # ),
+  chains = 4,
+  iter = 6000,      # More iterations for small n
+  warmup = 3000,
+  cores = 4,
+  seed = 123,
+  control = list(adapt_delta = 0.99)  # Higher for small sample
+)
+
+
+# check priors
+log(mean(y$total_bm))
+
+prior_pred <- brm(
+  total_bm ~ treatment + (1|site),
+  data = y,
+  family = Gamma(link = "log"),
+  prior = c(
+    prior(normal(4.976094, 1), class = "Intercept"),
+    prior(normal(0, 1), class = "b"),
+    prior(exponential(1), class = "sd"),
+    prior(gamma(2, 0.1), class = "shape")
+  ),
+  sample_prior = "only",
+  chains = 2, iter = 2000
+)
+
+pp_check(prior_pred, ndraws = 100) +
+  geom_vline(xintercept = range(y$total_bm), 
+             color = "red", linewidth = 1) +
+  labs(title = "Prior predictive check",
+       subtitle = "Simulated data (black) should cover observed range (red)") +
+  xlim(range(y$total_bm))
+
+# Extract prior predictions
+prior_samples <- posterior_predict(prior_pred, ndraws = 1000)
+
+# Check range
+range(y$total_bm)           # Observed range
+quantile(prior_samples, c(0.025, 0.975)) # priors are conservative (wider range than observed)
+
+# fit and diagnosis 
+summary(model_subset)
+all(rhat(model_subset) < 1.01)
+neff_ratio(model_subset)
+
+pp_check(model_subset, ndraws = 100)
+pp_check(model_subset, type = "stat", stat = "mean")
+
+loo_subset <- loo(model_subset); print(loo_subset)
+plot(loo_subset)
+
+# get posterior stats
+results <- describe_posterior(
+  model_subset,
+  ci = 0.95,
+  test = c("pd", "rope", "bf")
+); print(results)
+
+treatment_effect <- model_subset %>%
+  spread_draws(b_treatmentsnowfence) %>%  # Adjust name if needed
+  median_hdi(.width = c(0.50, 0.80, 0.95)); print(treatment_effect)
+
+pd_result <- pd(model_subset); print(pd_result)
+
+model_subset %>%
+  spread_draws(b_treatmentsnowfence) %>%
+  mutate(effect_ratio = exp(b_treatmentsnowfence)) %>%  # Back-transform
+  median_hdi(effect_ratio, .width = 0.95)
+```
+
 ```{r}
 # plotting leaf biomass vs pinpoint
 leaf_biomass_pinpoint %>% 
@@ -186,6 +335,7 @@ ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height
 ```
 
 ### data prep
+
 ```{r}
 
 vag_nig_sums <- leaf_biomass_pinpoint %>%
@@ -207,7 +357,6 @@ model_bio_pp <- leaf_biomass_pinpoint %>%
 model_bio_pp <- bind_rows(model_bio_pp, vag_nig_sums)
   
 ```
-
 
 ```{r}
 # exclude species with insufficient data
@@ -252,6 +401,7 @@ leaf_results <- leaf_results[12,] %>%
 ```
 
 ## stem biomass
+
 ```{r}
 # plotting leaf biomass vs pinpoint
 stem_biomass_pinpoint %>% 
@@ -322,8 +472,8 @@ biomass_models <- bind_rows(leaf_results, stem_results) %>%
 write_csv(biomass_models, "3_output/2_statistics/biomass/biomass_models.csv")
 ```
 
-
 # total biomass
+
 ```{r}
 full_pinpoint <- read.csv("2_data/2_clean/pinpoint/vp_pp_2025_l.csv")
 ```
@@ -363,7 +513,6 @@ no_bm <- community_biomass %>%
 
 
 ```
-
 
 ```{r}
 community_biomass %>% 
@@ -530,9 +679,8 @@ community %>%
   guides(fill = guide_legend(reverse = TRUE))
 ```
 
+\# PCA of biomass and traits
 
- # PCA of biomass and traits
 ```{r}
 
 ```
-

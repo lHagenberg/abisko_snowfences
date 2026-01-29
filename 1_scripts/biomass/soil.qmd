@@ -1,0 +1,425 @@
+---
+title: "soil"
+format: html
+editor: visual
+---
+
+# Prep
+
+## Setup
+
+```{r setup, include=F, message=F,warning=F}
+#| echo: false
+#| cache: true
+rm(list =ls())
+#getwd()
+#setwd("C:/Users/jadi0015/OneDrive - Umeå universitet/Documents/1_NissonCarbon/NissonCarbon")
+library(readr)
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(tidyr)
+library(brms)
+library(tidybayes)
+library(gt)
+library(purrr)
+library(gtExtras)
+library(bayestestR)
+library(emmeans)
+
+```
+
+## Data
+
+# Plots
+
+```{r}
+soil_data <- readRDS("../1_data/final/soil_data.rds")
+
+carbon_comp <- soil_data$carbon_comp
+carbon_comp_list <- carbon_comp %>%
+  arrange(veg, plot, treat, sample) %>% 
+  group_split(veg,sample)
+
+
+stocks <- soil_data$stocks
+stock_list <- stocks %>%
+  group_split(veg, sample)
+```
+
+## Depth
+
+```{r sum_profile, warning=F, message=F}
+#| echo: false
+# ggplot(long_profile, aes(x = habitat,
+#                    y = depth,
+#                    fill = treat)) +
+#   geom_boxplot() +
+#   labs(x = "Habitat × sample",
+#        y = "Layer Depth",
+#        fill = "treat") +
+#   scale_y_continuous() +
+#   theme_bw() +
+#   facet_wrap(~Layer)+
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+## Bulk
+
+```{r long profile, warning=F, message=F}
+#| echo: false
+# ggplot(carbon_comp, aes(x = veg,
+#                    y = bulk,
+#                    fill = treat)) +
+#   geom_boxplot() +
+#   labs(x = "Habitat × sample",
+#        y = "Bulk_density",
+#        fill = "treat") +
+#   scale_y_continuous() +
+#   theme_bw() +
+#   facet_wrap(~sample)+
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## carbon stock
+
+test model str
+
+```{r}
+# model <- brm(
+#     c_stock ~ treat + (1 | plot),
+#     data = carbon_comp,
+#     family = gaussian(),
+#     chains = 4, iter = 8000, warmup = 2000, cores = 4,
+#     silent = TRUE, 
+#     refresh = 0,
+#     control = list(adapt_delta = 0.95, max_treedepth = 15)
+#   )
+```
+
+### total-brms
+
+test \<- fit_one_model(l_stocks)
+
+```{r model_brms, warning=FALSE,message=F}
+#| echo: false
+# options(brms.backend = NULL) <- NEVER PLAY WITH THIS AGAIN!
+fit_model <- function(d, stock_var = "c_stock", quiet = TRUE) {
+
+  veg_name  <- unique(d$veg)
+  layer     <- unique(d$sample)
+
+  # -----------------------
+  # RAW SUMMARY
+  # -----------------------
+  raw_summary <- d %>%
+    
+    # mean and sd for each treatment
+    group_by(treat) %>%
+    summarise(
+      raw_mean = mean(.data[[stock_var]], na.rm = TRUE),
+      raw_sd   = sd(.data[[stock_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    
+    # Add total (across all treatments) 
+    # total being litter + humues
+    bind_rows(
+      d %>%
+        summarise(
+          treat    = "total",
+          raw_mean = mean(.data[[stock_var]], na.rm = TRUE),
+          raw_sd   = sd(.data[[stock_var]], na.rm = TRUE)
+        )
+    ) %>%
+    pivot_wider(
+      names_from = treat,
+      values_from = c(raw_mean, raw_sd)
+    ) %>%
+    rename(
+      ctl_mean   = raw_mean_C,
+      ctl_sd     = raw_sd_C,
+      sf_mean    = raw_mean_S,
+      sf_sd      = raw_sd_S,
+      total_mean = raw_mean_total,
+      total_sd   = raw_sd_total
+    )
+
+
+  # -----------------------
+  # MODEL FORMULA
+  # -----------------------
+  
+  # used to have varying stock_vars
+  formula <- as.formula(paste0(stock_var, " ~ treat + (1 | plot)"))
+
+  # -----------------------
+  # FIT MODEL
+  # -----------------------
+  model <- brm(
+    formula = formula,
+    data = d,
+    family = gaussian(), # assume normal
+    chains = 2, cores = 2, # rerun later with 4x4
+    iter = 8000, warmup = 2000, # increase to improve "convergence"
+    backend = "rstan",
+    control = list(adapt_delta = 0.95, max_treedepth = 15),
+    refresh = if (quiet) 0 else 100
+  )
+
+  # -----------------------
+  # DIAGNOSTICS
+  # -----------------------
+  
+  # summarise diagnoistics in one table
+  diag <- tibble(
+    veg = veg_name,
+    layer = layer,
+    stock = stock_var,
+    n_divergent = sum(model$fit@sim$sampler_diagnostics[, "divergent__"]),
+    max_Rhat     = max(summary(model)$fixed[, "Rhat"]),
+    min_bulk_ESS = min(summary(model)$fixed[, "Bulk_ESS"]),
+    min_tail_ESS = min(summary(model)$fixed[, "Tail_ESS"])
+  )
+
+  # -----------------------
+  # POSTERIOR DRAWS
+  # -----------------------
+  
+  # collect posteriors in one table
+  draws <- spread_draws(model, b_Intercept, b_treatS) %>%
+    mutate(
+      control = b_Intercept,
+      treat   = b_Intercept + b_treatS
+    )
+
+  posterior_long <- draws %>%
+    select(.draw, control, treat) %>%
+    pivot_longer(c(control, treat),
+                 names_to = "treat",
+                 values_to = "value") %>%
+    mutate(
+      veg = veg_name,
+      layer = layer,
+      stock = stock_var
+    )
+
+  # -----------------------
+  # MARGINAL POSTERIOR MEANS (E[y])
+  # -----------------------
+  
+  # summarise predictions for plots
+  epred_summary <- posterior_long %>%
+    group_by(treat, veg, layer, stock) %>%
+    median_qi(value, .width = 0.95)
+
+
+  # -----------------------
+  # POSTERIOR SUMMARY TABLE
+  # -----------------------
+  
+  # collect summary of data
+  post_summary <- draws %>%
+    summarise(
+      post_mean_diff = mean(treat - control),
+      lower_cred     = quantile(treat - control, 0.025),
+      upper_cred     = quantile(treat - control, 0.975),
+      prob_increase  = mean(treat > control),
+      prob_decrease  = mean(treat < control),
+      bf             = prob_increase / prob_decrease
+    )
+  
+  # posterior difference vector
+  diff_vals <- draws$treat - draws$control
+
+  # Compute pd
+  pd_val   <- pd(diff_vals)$pd
+  
+  
+  # compute ROPE
+  sd_diff <- sd(diff_vals)
+  rope_bounds <- c(-1, 1) * sd_diff
+  rope_val <- rope(diff_vals, range = rope_bounds)
+
+
+  # bind results
+  results <- bind_cols(raw_summary, post_summary) %>%
+    mutate(
+      veg = veg_name,
+      layer = layer,
+      stock = stock_var,
+      mean = sprintf("%.4f ± %.4f", total_mean, total_sd),
+      control   = sprintf("%.4f ± %.4f", ctl_mean, ctl_sd),
+      snowfence = sprintf("%.4f ± %.4f", sf_mean, sf_sd),
+      mean_diff = sprintf("%.4f", post_mean_diff),
+      CI_low        = sprintf("%.4f", lower_cred),
+      CI_high       = sprintf("%.4f", upper_cred),
+      pd = sprintf("%.3f",pd_val),
+      rope_pct = sprintf("%.4f", rope_val)
+    ) %>%
+    select(veg, layer, stock, control, snowfence,
+           mean_diff, CI_low, CI_high,, pd, rope_pct)
+
+  # -----------------------
+  # RETURN RESULTS
+  # -----------------------
+  list(
+    posterior_long = posterior_long,
+    epred_summary  = epred_summary,
+    diagnostics    = diag,
+    results        = results
+  )
+}
+
+# -----------------------
+# SHOW RESULTS FUNCTIONS
+# -----------------------
+
+# view_results <- function(all_results){
+#   results <- bind_rows(
+#   lapply(seq_along(all_results), function(i) {
+#     all_results[[i]]$results %>% mutate(dataset = i)
+#     })
+#   )
+#   View(results)
+# }
+# view_diagnostics <- function(all_results){
+#   results <- bind_rows(
+#   lapply(seq_along(all_results), function(i) {
+#     all_results[[i]]$diagnostics %>% mutate(dataset = i)
+#     })
+#   )
+#   View(results)
+# }
+```
+
+Run models
+
+```{r, message = F, warning=F}
+bulk_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "bulk")
+})
+
+depth_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "depth")
+})
+
+o_c_percent_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "o_c_percent")
+})
+o_n_percent_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "o_n_percent")
+})
+c_stock_results <- lapply(stock_list, function(d) {
+  fit_model(d, stock_var = "c_stock")
+})
+n_stock_results <- lapply(stock_list, function(d) {
+  fit_model(d, stock_var = "n_stock")
+})
+alkyl_stock_results <- lapply(stock_list, function(d) {
+  fit_model(d, stock_var = "alkyl_stock")
+})
+o_alkyl_stock_results <- lapply(stock_list, function(d) {
+  fit_model(d, stock_var = "o_alkyl_stock")
+})
+c_n_ratio_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "c_n_ratio")
+})
+d13c_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "d13c")
+})
+d15n_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "d15n")
+})
+alkyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "Alkyl")
+})
+carbohydrate_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "Carbohydrate")
+})
+carbonyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "carbonyl")
+})
+o_aromatic_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "o_aromatic")
+})
+aromatic_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "aromatic")
+})
+methoxy_n_alkyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "methoxy_n_alkyl")
+})
+o_alkyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "o_alkyl")
+})
+di_o_alkyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "di_o_alkyl")
+})
+Alkyl_o_alkyl_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "Alkyl/Carbohydrate")
+})
+Carbohydrate_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "Carbohydrate")
+})
+F_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "F")
+})
+G_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "G")
+})
+dS_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "dS")
+})
+eS_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "eS")
+})
+total_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "total_vascular")
+})
+alkyl_c_results <- lapply(carbon_comp_list, function(d) {
+  fit_model(d, stock_var = "alkyl_c")
+})
+
+```
+
+view results
+
+```{r}
+view_results(alkyl_c_results)
+view_diagnostics(alkyl_c_results)
+```
+
+collect results
+
+```{r}
+# Get all object names ending with "_results"
+result_names <- ls(pattern = "_results$")
+
+# Put them into a named list
+result_list <- mget(result_names)
+```
+
+Rerun single variables and add them
+
+```{r}
+# result_list <- readRDS("C:/Users/jadi0015/OneDrive - Umeå universitet/Documents/1_NissonCarbon/NissonCarbon/1_data/Model/all_results.rds")
+
+# result_list[["Alkyl_o_alkyl_results"]] <- Alkyl_o_alkyl_results
+
+# result_list[["total_results"]] <- total_results
+
+# result_list[["alkyl_c_results"]] <- alkyl_c_results
+
+```
+
+save results
+
+```{r}
+# Save to RDS
+saveRDS(result_list, 
+        file = "C:/Users/jadi0015/OneDrive - Umeå universitet/Documents/1_NissonCarbon/NissonCarbon/1_data/Model/all_results.rds")
+```
