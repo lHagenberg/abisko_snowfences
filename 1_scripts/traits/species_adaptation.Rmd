@@ -158,6 +158,18 @@ ITV <- bind_rows(fix_avg, spec_avg) %>%
 ```
 
 ```{r}
+ITV_wide <- ITV %>% 
+  select(-plot) %>% 
+  pivot_wider(names_from = treatment, 
+              values_from = CWM) %>% 
+  mutate(diff = snowfence- control)
+ggplot(ITV_wide, aes(x=habitat,y=diff, fill=var_type))+
+  geom_boxplot()+
+  facet_wrap(~trait, 
+             scales = "free_y")
+```
+
+```{r}
 ITV_w <- ITV %>% 
   pivot_wider(names_from = var_type, values_from = CWM)
 
@@ -883,6 +895,12 @@ varpart_r2_hbt %>%
 
 
 ```
+
+### taxonomic levels
+```{r}
+#### (Henn et al, 2008)
+```
+
 
 ## local vs. global
 ```{r}

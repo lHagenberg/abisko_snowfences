@@ -46,7 +46,7 @@ total_hits <- community %>%
   summarise(total_hits = sum(hits)) %>% 
   pivot_wider(names_from = spec, values_from = total_hits) %>% 
   column_to_rownames("plot") %>% 
-  select_if(negate(function(col) is.numeric(col) && sum(col) < 1))
+  select_if(negate(function(col) is.numeric(col) && sum(col) < 1)) #??? what is this
 
 leaf_bm <- community %>%
   filter(part == "leaf") %>% 
@@ -80,7 +80,7 @@ spec_nmds <- leaf_bm %>%
 meta_nmds <- bm_nmds %>% 
   rownames_to_column("plot_id") %>% 
   right_join(meta_data, bm_nmds, by = "plot_id") %>% 
-  select(plot_id, habitat:treatment, NMDS1, NMDS2) %>% 
+  select(plot_id, site_id, habitat:treatment, NMDS1, NMDS2) %>% 
   na.omit()
 ```
 
@@ -97,6 +97,7 @@ pa <- ggplot() +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_shape_manual(values = c(16, 8)) +
   geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
+  #geom_line(data = meta_nmds, aes(x = NMDS1, y = NMDS2, group = site_id), alpha = 0.3) + 
   annotate("text", x = -1, y = 1.2, label = "stress = 0.091") +
   #xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
   theme_classic() +
@@ -279,8 +280,8 @@ pa <- ggplot() +
   geom_segment(data = trait_scores_a, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = site_scores, aes(x = PC1, y = PC2, color = habitat, shape = treatment), size = 3, stroke = 1, alpha = .8) + # add the point markers
   geom_label(data = trait_scores_a, aes(PC1, PC2, label = trait_labs_a), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
+  #geom_line(data = site_scores, aes(x = PC1, y = PC2, group = site), alpha = 0.3) + 
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
-  #coord_equal() +
   scale_shape_manual(values = c(16, 8)) +
   scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
