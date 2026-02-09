@@ -20,10 +20,16 @@ library(RColorBrewer)
 library(brms)
 library(tidybayes)
 library(gt)
+library(psych)
 
 library(gtExtras)
 library(bayestestR)
 library(emmeans)
+
+# plotting
+library(ggpattern)
+library(ggh4x)
+library(patchwork)
 
 library(openxlsx)
 ```
@@ -55,14 +61,14 @@ leaf_bm <- community %>%
 
 # subset lists 
 plot_bm_ls <- leaf_bm %>% 
-  mutate(across(where(is.numeric),
-                ~ ifelse(.x == 0, 0.0001, .x))) %>% # replace 0 (for gamma)
+  # mutate(across(where(is.numeric),
+  #               ~ ifelse(.x == 0, 0.0001, .x))) %>% # replace 0 (for gamma)
   pivot_wider(names_from = group, values_from = total_bm) %>% 
   mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
   group_split(habitat) %>%
-  set_names(unique(leaf_bm$habitat))
+  set_names(unique(leaf_bm$habitat)) 
 
-plot_bm_ls[[1]]
+plot_bm_ls[[2]]
 ```
 
 # Plot level statistics
@@ -115,7 +121,10 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
   model <- brm(
     formula = formula,
     data = d,
-    family = Gamma(link = "log"), # assume normal
+    # family = gaussian(), # assume normal
+    # family = Gamma(link = "log"), # gamma distribution
+    # family = hurdle_gamma(),
+    family = hurdle_lognormal(), 
     chains = 2, cores = 2, # rerun later with 4x4
     iter = 8000, warmup = 2000, # increase to improve "convergence"
     backend = "rstan",
@@ -144,13 +153,15 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
   # collect posteriors in one table
   draws <- spread_draws(model, b_Intercept, b_treatmentsnowfence) %>%
     mutate(
-      control = exp(b_Intercept),
-      treatment   = exp(b_Intercept + b_treatmentsnowfence)
+      # control = b_Intercept,
+      # snowfence = b_Intercept + b_treatmentsnowfence
+      control = exp(b_Intercept), # in case of Gamma
+      snowfence = exp(b_Intercept + b_treatmentsnowfence)
     )
 
   posterior_long <- draws %>%
-    select(.draw, control, treatment) %>%
-    pivot_longer(c(control, treatment),
+    select(.draw, control, snowfence) %>%
+    pivot_longer(c(control, snowfence),
                  names_to = "treatment",
                  values_to = "value") %>%
     mutate(
@@ -175,16 +186,16 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
   # collect summary of data
   post_summary <- draws %>%
     summarise(
-      post_mean_diff = mean(treatment - control),
-      lower_cred     = quantile(treatment - control, 0.025),
-      upper_cred     = quantile(treatment - control, 0.975),
-      prob_increase  = mean(treatment > control),
-      prob_decrease  = mean(treatment < control),
+      post_mean_diff = mean(snowfence - control),
+      lower_cred     = quantile(snowfence - control, 0.025),
+      upper_cred     = quantile(snowfence - control, 0.975),
+      prob_increase  = mean(snowfence > control),
+      prob_decrease  = mean(snowfence < control),
       bf             = prob_increase / prob_decrease
     )
   
   # posterior difference vector
-  diff_vals <- draws$treatment - draws$control
+  diff_vals <- draws$snowfence - draws$control
 
   # Compute pd
   pd_val   <- pd(diff_vals)$pd
@@ -256,6 +267,27 @@ leaf_bm %>%
   facet_wrap(~ habitat * group, scales = "free")
 ```
 
+### Model test
+
+```{r}
+fit1 <- brm(eS ~ treatment + (1 | site), 
+            family = gaussian(), 
+            data = plot_bm_ls[[2]])
+loo1 <- loo(fit1)
+
+fit2 <- brm(eS ~ treatment + (1 | site),
+            family = hurdle_lognormal(),
+            data = plot_bm_ls[[2]])
+loo2 <- loo(fit2)
+
+fit3 <- brm(eS ~ treatment + (1 | site),
+            family = Gamma(link = "log"),
+            data = plot_bm_ls[[2]])
+loo3 <- loo(fit3)
+
+loo_compare(loo1, loo2, loo3)
+```
+
 ```{r}
 gr_frms <- colnames(plot_bm_ls[[1]][,sapply(plot_bm_ls[[1]],is.numeric)])
 brm_fit_ls <- list()
@@ -263,7 +295,7 @@ brm_fit_ls <- list()
 for(gr_frm in gr_frms) {
     fit_name <- paste0(gr_frm, "_fit")
     
-    brm_fit_list[[fit_name]] <- lapply(plot_bm_ls, function(d) {
+    brm_fit_ls[[fit_name]] <- lapply(plot_bm_ls, function(d) {
       fit_model(d, growth_form = gr_frm)
     })
 }
@@ -293,12 +325,12 @@ bm_brm_est <- map_dfr(names(brm_fit_ls), function(fit_name) {
   }) 
 }) %>% arrange(habitat, group)
 
-# # model full posteriors
-# bm_brm_post <- map_dfr(names(brm_fit_ls), function(fit_name) {
-#   map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
-#     habitat_result$posterior_long
-#   }) 
-# })  
+# model full posteriors
+bm_brm_post <- map_dfr(names(brm_fit_ls), function(fit_name) {
+  map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
+    habitat_result$posterior_long
+  })
+})
 ```
 
 ```{r}
@@ -313,6 +345,65 @@ writeData(wb, "diagnostics", bm_brm_diagn); rm(bm_brm_diagn)
 addWorksheet(wb, "marginal_estimates")
 writeData(wb, "marginal_estimates", bm_brm_est); rm(bm_brm_est)
 
+addWorksheet(wb, "post_draws")
+writeData(wb, "post_draws", bm_brm_post); rm(bm_brm_post)
+
 # Save the workbook
-saveWorkbook(wb, "3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", overwrite = TRUE); rm(wb)
+saveWorkbook(wb, "3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", overwrite = TRUE); rm(wb)
+```
+
+### Plotting
+
+```{r}
+# only hurdle_gamma in case of zeros
+gamma0_draws <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F" |
+           habitat == "ridge" & group == "F" |
+           habitat == "ridge" & group == "G") 
+gamma0_est <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F" |
+           habitat == "ridge" & group == "F" |
+           habitat == "ridge" & group == "G") 
+
+gamma_draws <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
+  anti_join(gamma0_draws, by = c("treatment", "habitat", "group"))
+gamma_est <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+  anti_join(gamma0_est, by = c("treatment", "habitat", "group"))
+
+est <- bind_rows(gamma0_est, gamma_est)
+draws <- bind_rows(gamma0_draws, gamma_draws) %>% 
+  left_join(est %>% 
+              select(treatment:group, .upper)) %>% 
+  filter(value <= (.upper * 1.2))
+
+# hurdle_gamma for everything
+est <- read_excel("3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", sheet = "marginal_estimates")
+draws <- read_excel("3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", sheet = "post_draws") %>% 
+  left_join(est %>% 
+              select(treatment:group, .upper)) %>% 
+  filter(value <= (.upper * 1.2))
+```
+
+```{r}
+leaf_bm_w <- leaf_bm %>% 
+  pivot_wider(names_from = group, values_from = total_bm) %>% 
+  mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
+  pivot_longer(cols = `F`:total_bm, names_to = "group", values_to = "total_bm")
+
+ggplot() +
+  geom_violin(data = draws, # posterior distribution
+              aes(x = treatment, y = value, fill = treatment), #trim = TRUE, 
+               color = "white", alpha = 0.4) +
+  geom_point(data = leaf_bm_w,
+             aes(x = treatment, y = total_bm, color = treatment)) +
+  geom_point(data = est, # estimated mean
+             aes(x = treatment, y = value),
+             alpha = 0.4) +
+  geom_errorbar(data = est, # 95% CIs
+                aes(ymin = .lower, ymax = .upper, x = treatment),
+                alpha = 0.4) +
+  facet_grid2(rows = vars(habitat), cols = vars(group), scales = "free_y", independent = "y") +
+  theme_classic()
 ```
