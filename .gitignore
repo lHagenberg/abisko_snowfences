@@ -3,6 +3,7 @@
 .RData
 .RDataTmp
 .Ruserdata
+.gitignore
 2_data
 3_output
 1_scripts/other/
