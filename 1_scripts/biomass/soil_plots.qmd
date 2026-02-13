@@ -1,0 +1,2046 @@
+---
+title: "soil_plots"
+format: html
+editor: visual
+---
+
+## SOM analysis Nisson Snowfences
+
+```{r setup, include=T, message=F,warning=F}
+#| echo: false
+#| cache: true
+
+rm(list =ls())
+#getwd()
+setwd("C:/Users/jadi0015/OneDrive - Umeå universitet/Documents/1_NissonCarbon/NissonCarbon")
+library(dplyr)
+library(readr)
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(tidyr)
+library(brms)
+library(tidybayes)
+library(gt)
+library(purrr)
+library(gtExtras)
+library(bayestestR)
+library(emmeans)
+library(patchwork)
+library(psych)
+library(ggpattern)
+library(writexl)
+```
+
+# import data
+
+```{r}
+# posteriors
+all_results <- readRDS("../1_data/Model/all_results.rds")
+
+# raw data
+soil_data <- readRDS("../1_data/final/soil_data.rds")
+carbon_comp <- soil_data$carbon_comp
+
+# stocks
+stocks <- soil_data$stocks
+```
+
+# plot results
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+plot_results <- function(result_data, raw_data){
+
+  # -----------------------
+  # GET POSTERIOR 
+  # -----------------------
+  
+  # bin results for each
+  posteriors <- bind_rows(
+  lapply(seq_along(result_data), function(i) {
+    result_data[[i]]$posterior_long %>% mutate(dataset = i)
+    })
+  )
+  
+  # -----------------------
+  # GET PREDICTION 
+  # -----------------------
+  epred_summary <- bind_rows(
+    lapply(seq_along(result_data), function(i) {
+    result_data[[i]]$epred_summary %>% mutate(dataset = i)
+    })
+  )
+
+  epred_summary <- epred_summary %>% 
+    mutate(treat = ifelse(treat == "control","C","S"))
+  
+  epred_summary$veg <- factor(
+    epred_summary$veg,
+    levels = c("d", "x", "e")  
+  )
+  dummy_litter <- data.frame(
+    treat = c("C","S"),
+    veg = c("x","x"),
+    layer= c("L", "L"),
+    stock = c(unique(epred_summary$stock),unique(epred_summary$stock)),
+    value = c(NA,NA),
+    .lower= c(NA,NA),
+    .upper= c(NA,NA),
+    .width= c(NA,NA),
+    .point= c(NA,NA),
+    .interval= c(NA,NA),
+    dataset = c(NA,NA)
+  )
+  epred_summary <- bind_rows(epred_summary, dummy_litter)
+  
+  # -----------------------
+  # LITTER PLOT
+  # -----------------------
+  
+  l_posteriors <- posteriors[posteriors$layer == "L",]
+  
+  l_posteriors <- l_posteriors %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  filter(value >= q_low, value <= q_high)
+  
+  litter <- ggplot() +
+    
+    geom_line(data = raw_data[raw_data$sample == "L",],
+               aes(y = .data[[unique(epred_summary$stock)]],
+                   x = treat,
+                   color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)+
+    
+    geom_violin(
+      data = l_posteriors,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = epred_summary[epred_summary$layer == "L",],
+               aes(x=treat, y=value),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = epred_summary[epred_summary$layer == "L",],
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = raw_data[raw_data$sample == "L",],
+      aes(y = .data[[unique(epred_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 15) +
+    labs(title = "Litter") +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0)  
+    )+
+    xlab("") +
+    ylab(as.character(unique(epred_summary$stock)))+
+    facet_wrap(
+    ~veg,
+    labeller = labeller(
+      veg = c(
+        "d" = "Fen",
+        "x" = "Ridge",
+        "e" = "Heath"
+      )
+    )
+  )
+
+  # -----------------------
+  # LITTER PLOT
+  # -----------------------
+  
+  s_posteriors <- posteriors[posteriors$layer == "S",]
+  
+  s_posteriors <- s_posteriors %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  filter(value >= q_low, value <= q_high)
+  
+  
+  
+  soil <- ggplot() +
+    geom_line(data = raw_data[raw_data$sample == "S",],
+               aes(y = .data[[unique(epred_summary$stock)]],
+                   x = treat,
+                   color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)+
+    geom_violin(
+      data = s_posteriors,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = epred_summary[epred_summary$layer == "S",],
+               aes(x=treat, y=value),color = "grey40",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = epred_summary[epred_summary$layer == "S",],
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "grey40",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = raw_data[raw_data$sample == "S",],
+      aes(y = .data[[unique(epred_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 15) +
+    labs(title = "Soil") +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0) 
+    )+
+    xlab("") +
+    ylab(as.character(unique(epred_summary$stock)))+
+    facet_wrap(
+    ~veg,
+    labeller = labeller(
+      veg = c(
+        "d" = "Fen",
+        "x" = "Ridge",
+        "e" = "Heath"
+      )
+    )
+  )
+
+  # -----------------------
+  # TOTAL PLOT
+  # -----------------------
+
+final_plot <- litter / soil + plot_annotation(
+  caption = "Boxplots and points represent the observed data, while violin plots depict the posterior distributions from the Bayesian model."
+)
+
+return(final_plot)
+}
+
+plot_table <- function(all_results){
+  results<- bind_rows(
+  lapply(seq_along(all_results), function(i) {
+  all_results[[i]]$results %>% mutate(dataset = i)
+  })
+  )
+  return(gt(results))
+
+}
+return_table <- function(all_results){
+  results<- bind_rows(
+  lapply(seq_along(all_results), function(i) {
+  all_results[[i]]$results %>% mutate(dataset = i)
+  })
+  )
+  return(results)
+}
+
+
+
+combine_results <- function(...) {
+  
+  # Capture all the lists passed to the function
+  lists <- list(...)
+  
+  # For each list, attach dataset index and extract $results
+  processed <- lapply(lists, function(lst) {
+    lapply(seq_along(lst), function(i) {
+      lst[[i]]$results %>% mutate(dataset = i)
+    })
+  })
+  
+  # Flatten one level and bind all rows
+  bind_rows(unlist(processed, recursive = FALSE))
+}
+
+
+```
+
+```{r}
+bind_posterior_by_stock <- function(all_results, stocks) {
+  
+  out <- list()
+  
+  for (group in all_results) {
+    for (i in seq_along(group)) {
+      pl <- group[[i]]$posterior_long
+      if (is.null(pl)) next
+      
+      keep <- pl$stock %in% stocks
+      if (!any(keep, na.rm = TRUE)) next
+      
+      out[[length(out) + 1]] <- pl[keep, , drop = FALSE]
+    }
+  }
+  
+  do.call(rbind, out)
+}
+
+bind_summary_by_stock <- function(all_results, stocks) {
+  
+  out <- list()
+  
+  for (group in all_results) {
+    for (i in seq_along(group)) {
+      pl <- group[[i]]$epred_summary
+      if (is.null(pl)) next
+      
+      keep <- pl$stock %in% stocks
+      if (!any(keep, na.rm = TRUE)) next
+      
+      out[[length(out) + 1]] <- pl[keep, , drop = FALSE]
+    }
+  }
+  
+  do.call(rbind, out)
+}
+```
+
+```{r}
+
+heath <- carbon_comp[carbon_comp$veg == "e"& carbon_comp$sample== "L",] %>% 
+  select(plot, treat,carbonyl,o_aromatic,aromatic,di_o_alkyl,o_alkyl,methoxy_n_alkyl,alkyl_c ) %>% 
+  pivot_longer(cols = c(carbonyl,o_aromatic,aromatic,di_o_alkyl,o_alkyl,methoxy_n_alkyl,alkyl_c ),
+               names_to = "stock",
+               values_to = "value")
+
+combined_alkyl <- bind_posterior_by_stock(
+  all_results,
+  stocks = c("carbonyl","o_aromatic","aromatic","di_o_alkyl","o_alkyl", "methoxy_n_alkyl","alkyl_c")
+)
+heath_litter <- combined_alkyl %>% 
+  dplyr::filter(veg=="e" & layer =="L") #%>% 
+  # mutate(facets = ifelse(stock == "c_n_ratio", "C/N Ratio",
+  #                        ifelse(stock == "Alkyl/Carbohydrate", "Alkyl/Carbohydrate", "Carbon Compounds")))
+
+  heath_litter <- heath_litter %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  dplyr::filter(value >= q_low, value <= q_high)
+
+
+
+summary_alkyl <- bind_summary_by_stock(
+  all_results,
+  stocks = c("carbonyl","o_aromatic","aromatic","di_o_alkyl","o_alkyl", "methoxy_n_alkyl","alkyl_c")
+)
+
+summary_alkyl <- summary_alkyl %>% 
+    mutate(treat = ifelse(treat == "control","C","S"))
+  
+heath_litter_summary <- summary_alkyl %>% 
+  dplyr::filter(veg=="e" & layer =="L")
+
+heath_litter <- heath_litter %>%
+  mutate(stock = factor(
+    stock,
+    levels = c(
+      "carbonyl",
+      "o_aromatic",
+      "aromatic",
+      "di_o_alkyl",
+      "o_alkyl",
+      "methoxy_n_alkyl",
+      "alkyl_c"
+    )
+  )) 
+heath_litter_summary <- heath_litter_summary %>%
+  mutate(stock = factor(stock, levels = levels(heath_litter$stock)))
+
+
+normal_NMR<- ggplot(heath_litter, aes(y=value,fill=treat))+
+  geom_violin(
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color="white",
+      alpha = 0.4
+    ) +
+      scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+      geom_errorbar(data = heath_litter_summary,
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = heath,
+      aes(y = value, x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+  ylab("Normalised NMR integral")+
+  xlab("Treatment")+
+  labs(title="Normalised Integrals of corresponding Carbon Compounds")+
+  theme_classic(base_size = 10)+
+  facet_wrap(~factor(
+    stock,
+    levels = c(
+      "carbonyl",
+      "o_aromatic",
+      "aromatic",
+      "di_o_alkyl",
+      "o_alkyl",
+      "methoxy_n_alkyl",
+      "alkyl_c"
+    )
+  ), scales="free",nrow=1)
+```
+
+```{r}
+ggplot() +
+    geom_violin(
+      data = heath_litter,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = heath_litter_summary,
+               aes(x=treat, y=value),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = heath_litter_summary,
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = heath,
+      aes(y = .data[[unique(heath_litter_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 15) +
+    labs(title = "Litter") +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0)  
+    )+
+    xlab("") +
+    ylab(as.character(unique(heath_litter_summary$stock)))
+  
+
+
+```
+
+```{r}
+Forb <- return_table(all_results$F_results)
+Gram <- return_table(all_results$G_results)
+deci <- return_table(all_results$dS_results)
+ever <- return_table(all_results$eS_results)
+tota <- return_table(all_results$total_results)
+
+vegetation_table <- rbind(Forb,Gram, deci, ever,tota)
+vegetation_table <- vegetation_table %>% 
+  filter(layer == "S") %>% 
+  select(-dataset,-layer) %>% 
+  mutate(pd = round(as.numeric(pd)*100,2),
+         rope_pct = round(as.numeric(rope_pct)*100,4)) %>% 
+  mutate(Significance = ifelse(rope_pct < 2.5, paste0("pd = ",pd,"; rope < 2.5%",sep=""),
+                               paste0("pd = ",pd))) %>% 
+  mutate(Difference = paste0(mean_diff, " [",CI_low," - ",CI_high, "]",sep="")) %>% 
+  arrange(veg)
+
+write_csv(vegetation_table, "../1_data/vegetation_table.csv")
+```
+
+```{r}
+cstock <- return_table(all_results$c_stock_results)
+oc <- return_table(all_results$o_c_percent_results)
+on <- return_table(all_results$o_n_percent_results)
+cn <- return_table(all_results$c_n_ratio_results)
+
+stock_table <- rbind(cstock,oc,on,cn)
+stock_table <- stock_table %>% 
+  select(-dataset) %>% 
+  mutate(pd = round(as.numeric(pd)*100,2),
+         rope_pct = round(as.numeric(rope_pct)*100,4)) %>% 
+  mutate(Significance = ifelse(rope_pct < 2.5, paste0("pd = ",pd,"; rope < 2.5%",sep=""),
+                               paste0("pd = ",pd))) %>% 
+  mutate(Difference = paste0(mean_diff, " [",CI_low," - ",CI_high, "]",sep="")) %>% 
+  arrange(veg,layer)
+
+write_csv(stock_table, "../1_data/stock_table.csv")
+```
+
+```{r}
+carbonyl <- return_table(all_results$carbonyl_results)
+oaromat <- return_table(all_results$o_aromatic_results)
+aromat <- return_table(all_results$aromatic_results)
+dioalkyl <- return_table(all_results$di_o_alkyl_results)
+oalkyl <- return_table(all_results$o_alkyl_results)
+meth <- return_table(all_results$methoxy_n_alkyl_results)
+alkyl <- return_table(all_results$alkyl_results)
+ratio <- return_table(all_results$Alkyl_o_alkyl_results)
+
+compound_table <- rbind(carbonyl,oaromat,aromat,dioalkyl,oalkyl,meth,alkyl,ratio)
+compound_table <- compound_table %>% 
+  select(-dataset) %>% 
+  mutate(pd = round(as.numeric(pd)*100,2),
+         rope_pct = round(as.numeric(rope_pct)*100,4)) %>% 
+  mutate(Significance = ifelse(rope_pct < 2.5, paste0("pd = ",pd,"; rope < 2.5%",sep=""),
+                               paste0("pd = ",pd))) %>% 
+  mutate(Difference = paste0(mean_diff, " [",CI_low," - ",CI_high, "]",sep="")) %>% 
+  arrange(veg,layer)
+
+write_csv(compound_table, "../1_data/compound_table.csv")
+```
+
+# LITTER C_STOCK
+
+```{r}
+c_stock_posteriors <- bind_rows(
+  lapply(seq_along(all_results$c_stock_results), function(i) {
+    all_results$c_stock_results[[i]]$posterior_long %>% mutate(dataset = i)
+    })
+  ) 
+
+
+  
+  # -----------------------
+  # GET PREDICTION 
+  # -----------------------
+  epred_summary <- bind_rows(
+    lapply(seq_along(all_results$c_stock_results), function(i) {
+    all_results$c_stock_results[[i]]$epred_summary %>% mutate(dataset = i)
+    })
+  )
+
+  epred_summary <- epred_summary %>% 
+    mutate(treat = ifelse(treat == "control","C","S"))
+  
+  epred_summary$veg <- factor(
+    epred_summary$veg,
+    levels = c("d", "x", "e")  
+  )
+  
+  
+  # -----------------------
+  # LITTER PLOT
+  # -----------------------
+  
+  l_posteriors <- c_stock_posteriors[c_stock_posteriors$layer == "L"|c_stock_posteriors$veg == "x",]
+  
+  l_posteriors <- l_posteriors %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  filter(value >= q_low, value <= q_high)
+  
+stock <- ggplot() +
+    
+    geom_line(data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+               aes(y = .data[[unique(epred_summary$stock)]],
+                   x = treat,
+                   color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)+
+    
+    geom_violin(
+      data = l_posteriors,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+               aes(x=treat, y=value),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+      aes(y = .data[[unique(epred_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 10) +
+    labs(title = "Litter") +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0)  
+    )+
+    xlab("") +
+    ylab(as.character(unique(epred_summary$stock)))+
+    facet_wrap(
+    ~veg,
+    labeller = labeller(
+      veg = c(
+        "d" = "Fen",
+        "x" = "Ridge",
+        "e" = "Heath"
+      )
+    )
+  )
+
+
+```
+
+# LITTER C7N
+
+```{r}
+c_stock_posteriors <- bind_rows(
+  lapply(seq_along(all_results$c_n_ratio_results), function(i) {
+    all_results$c_n_ratio_results[[i]]$posterior_long %>% mutate(dataset = i)
+    })
+  ) 
+
+
+  
+  # -----------------------
+  # GET PREDICTION 
+  # -----------------------
+  epred_summary <- bind_rows(
+    lapply(seq_along(all_results$c_n_ratio_results), function(i) {
+    all_results$c_n_ratio_results[[i]]$epred_summary %>% mutate(dataset = i)
+    })
+  )
+
+  epred_summary <- epred_summary %>% 
+    mutate(treat = ifelse(treat == "control","C","S"))
+  
+  epred_summary$veg <- factor(
+    epred_summary$veg,
+    levels = c("d", "x", "e")  
+  )
+  
+  
+  # -----------------------
+  # LITTER PLOT
+  # -----------------------
+  
+  l_posteriors <- c_stock_posteriors[c_stock_posteriors$layer == "L"|c_stock_posteriors$veg == "x",]
+  
+  l_posteriors <- l_posteriors %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  filter(value >= q_low, value <= q_high)
+  
+c_n_ratio <- ggplot() +
+    
+    geom_line(data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+               aes(y = .data[[unique(epred_summary$stock)]],
+                   x = treat,
+                   color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)+
+    
+    geom_violin(
+      data = l_posteriors,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+               aes(x=treat, y=value),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+      aes(y = .data[[unique(epred_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 10) +
+    labs() +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0)  
+    )+
+    xlab("") +
+    ylab(as.character(unique(epred_summary$stock)))+
+    facet_wrap(
+    ~veg,
+    labeller = labeller(
+      veg = c(
+        "d" = "Fen",
+        "x" = "Ridge",
+        "e" = "Heath"
+      )
+    )
+)+
+  theme(
+    strip.text = element_blank(),         # Removes the text (labels)
+    strip.background = element_blank()    # Removes the colored box/background
+  )
+
+```
+
+# LITTER A7C
+
+```{r}
+c_stock_posteriors <- bind_rows(
+  lapply(seq_along(all_results$Alkyl_o_alkyl_results), function(i) {
+    all_results$Alkyl_o_alkyl_results[[i]]$posterior_long %>% mutate(dataset = i)
+    })
+  ) 
+
+
+  
+  # -----------------------
+  # GET PREDICTION 
+  # -----------------------
+  epred_summary <- bind_rows(
+    lapply(seq_along(all_results$Alkyl_o_alkyl_results), function(i) {
+    all_results$Alkyl_o_alkyl_results[[i]]$epred_summary %>% mutate(dataset = i)
+    })
+  )
+
+  epred_summary <- epred_summary %>% 
+    mutate(treat = ifelse(treat == "control","C","S"))
+  
+  epred_summary$veg <- factor(
+    epred_summary$veg,
+    levels = c("d", "x", "e")  
+  )
+  
+  
+  # -----------------------
+  # LITTER PLOT
+  # -----------------------
+  
+  l_posteriors <- c_stock_posteriors[c_stock_posteriors$layer == "L"|c_stock_posteriors$veg == "x",]
+  
+  l_posteriors <- l_posteriors %>% 
+    mutate(treat = ifelse(treat == "control","C","S")) %>%
+  group_by(treat) %>%
+  mutate(
+    q_low  = quantile(value, 0.005),
+    q_high = quantile(value, 0.995)
+  ) %>%
+  ungroup() %>%
+  filter(value >= q_low, value <= q_high)
+  
+decompo <- ggplot() +
+    
+    geom_line(data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+               aes(y = .data[[unique(epred_summary$stock)]],
+                   x = treat,
+                   color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)+
+    
+    geom_violin(
+      data = l_posteriors,
+      aes(y = value, x = treat, fill = treat),
+      trim = TRUE,
+      color = "white", alpha = 0.4
+    ) +
+    geom_point(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+               aes(x=treat, y=value),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    size = 3
+  ) +
+    geom_errorbar(data = epred_summary[epred_summary$layer == "L"| epred_summary$veg == "x",],
+    aes(ymin = .lower, ymax = .upper, x=treat),color = "darkgrey",
+    position = position_dodge(width = 0.4),
+    width = 0.2,
+    size = 0.8,
+    alpha = 0.7
+  ) +
+    geom_point(
+      data = carbon_comp[carbon_comp$sample == "L"| carbon_comp$veg =="x",],
+      aes(y = .data[[unique(epred_summary$stock)]], x = treat,color = treat),
+      alpha=1
+    ) +
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    ) +
+    scale_color_manual(
+      name = "",
+      values = c("C" = "#C65A00", "S" = "#1F5F8B"),
+      labels = c("Control", "Snowfence")
+    ) +
+    theme_classic(base_size = 10) +
+    labs() +
+    theme(
+      axis.ticks.x = element_blank(),
+      #axis.text.x = element_blank(),
+      plot.title = element_text(hjust = 0)  
+    )+
+    xlab("") +
+    ylab(as.character(unique(epred_summary$stock)))+
+    facet_wrap(
+    ~veg,
+    labeller = labeller(
+      veg = c(
+        "d" = "Fen",
+        "x" = "Ridge",
+        "e" = "Heath"
+      )
+    )
+)+
+  theme(
+    strip.text = element_blank(),         # Removes the text (labels)
+    strip.background = element_blank()    # Removes the colored box/background
+  )
+
+```
+
+```{r}
+litterplot <- 
+  stock / c_n_ratio / decompo +
+  plot_layout(heights = c(5, 5, 5))
+litterplot
+
+ggsave(
+  "../3_plots/litterplot.png",
+  plot = litterplot,
+  width = 10,
+  height = 6,
+  dpi = 600
+)
+```
+
+```{r}
+# Calculate totals with uncertainty
+c_stock_totals <- c_stock_posteriors %>%
+  filter(layer != "total") %>%
+  group_by(veg, treat) %>%
+  summarise(
+    total_mean = sum(mean),
+    total_sd = sqrt(sum(sd^2)),  # propagated uncertainty
+    .groups = "drop"
+  )
+
+# Create plot
+ggplot(c_stock_posteriors[c_stock_posteriors$layer == "Litter",], 
+       aes(x = treat, y = mean)) + 
+  geom_boxplot() +
+  facet_wrap(~veg) +
+  theme_minimal()
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$c_stock_results, carbon_comp))
+
+plot(plot_results(all_results$c_n_ratio_results, carbon_comp))
+plot(plot_results(all_results$Alkyl_o_alkyl_results, carbon_comp))
+```
+
+```{r}
+
+species_data_dl <- carbon_comp[carbon_comp$veg == "d"& carbon_comp$sample == "L", c("carbonyl",
+                                                       "o_aromatic",
+                                                       "aromatic",
+                                                       "di_o_alkyl",
+                                                       "o_alkyl",
+                                                       "methoxy_n_alkyl",
+                                                       "alkyl_c",
+                                                       "Alkyl/Carbohydrate",
+                                                       "c_n_ratio")]
+env_data_dl <- carbon_comp[carbon_comp$veg == "d"& carbon_comp$sample == "L", c("treat")]
+species_data_el <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "L", c("carbonyl",
+                                                       "o_aromatic",
+                                                       "aromatic",
+                                                       "di_o_alkyl",
+                                                       "o_alkyl",
+                                                       "methoxy_n_alkyl",
+                                                       "alkyl_c",
+                                                       "Alkyl/Carbohydrate",
+                                                       "c_n_ratio")]
+env_data_le <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "L", c("treat",
+                                                    "sample")]
+species_data_x <- carbon_comp[carbon_comp$veg == "x", c("carbonyl",
+                                                       "o_aromatic",
+                                                       "aromatic",
+                                                       "di_o_alkyl",
+                                                       "o_alkyl",
+                                                       "methoxy_n_alkyl",
+                                                       "alkyl_c",
+                                                       "Alkyl/Carbohydrate",
+                                                       "c_n_ratio")]
+env_data_x <- carbon_comp[carbon_comp$veg == "x" , c("treat",
+                                                    "sample")]
+```
+
+```{r}
+# Data extraction
+species_data_dl <- carbon_comp[carbon_comp$veg == "d" & carbon_comp$sample == "L", 
+                               c("carbonyl", "o_aromatic", "aromatic", 
+                                 "di_o_alkyl", "o_alkyl", "methoxy_n_alkyl",
+                                 "alkyl_c", "Alkyl/Carbohydrate","o_c_percent","o_n_percent", "c_n_ratio")]
+
+env_data_dl <- carbon_comp[carbon_comp$veg == "d" & carbon_comp$sample == "L", 
+                           c("treat"), drop = FALSE]
+
+# PCA
+pca_dl <- prcomp(species_data_dl, center = TRUE, scale. = TRUE)
+
+# Variance explained
+var_explained <- (pca_dl$sdev^2) / sum(pca_dl$sdev^2)
+pc1_var <- round(var_explained[1] * 100, 1)
+pc2_var <- round(var_explained[2] * 100, 1)
+
+# Scores with environmental data
+scores <- as.data.frame(pca_dl$x[, 1:2])
+scores <- cbind(scores, env_data_dl)
+
+# Check it worked
+str(scores)
+table(scores$treat)
+
+# Loadings
+loadings <- as.data.frame(pca_dl$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+# Scale arrows
+arrow_scale <- max(abs(scores[, 1:2])) * 0.8
+loadings[, 1:2] <- loadings[, 1:2] * arrow_scale
+
+# Plot
+FenLitter <- ggplot() +
+  geom_polygon(
+    data = scores %>% 
+      group_by(treat) %>% 
+      slice(chull(PC1, PC2)),
+    aes(x = PC1, y = PC2, fill = treat, group = treat),
+    alpha = 0.5,
+    color = NA
+  ) +
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, shape = treat, color = treat),
+    size = 3
+  ) +
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1*2, yend = PC2*2),
+    arrow = arrow(length = unit(0.25, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+  data = loadings,
+  aes(x = PC1*2, y = PC2*2, label = variable),
+  size = 3.5,
+  color = "black",
+  box.padding = 0.3,
+  point.padding = 0.2,
+  segment.color = "grey50"
+)+
+  scale_fill_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = c("C" = 16, "S" = 17)
+  ) +
+  xlab(paste0("PC1 (", pc1_var, "%)")) +
+  ylab(paste0("PC2 (", pc2_var, "%)")) +
+  labs(title = "Fen - Litter Layer") +
+  theme_classic()
+
+FenLitter
+```
+
+```{r}
+species_data_ds <- carbon_comp[carbon_comp$veg == "d" & carbon_comp$sample == "S", 
+                               c("carbonyl", "o_aromatic", "aromatic", 
+                                 "di_o_alkyl", "o_alkyl", "methoxy_n_alkyl",
+                                 "alkyl_c", "Alkyl/Carbohydrate","o_c_percent","o_n_percent", "c_n_ratio")]
+
+env_data_ds <- carbon_comp[carbon_comp$veg == "d" & carbon_comp$sample == "S", 
+                           c("treat"), drop = FALSE]
+
+# PCA
+pca_ds <- prcomp(species_data_ds, center = TRUE, scale. = TRUE)
+
+# Variance explained
+var_explained <- (pca_ds$sdev^2) / sum(pca_ds$sdev^2)
+pc1_var <- round(var_explained[1] * 100, 1)
+pc2_var <- round(var_explained[2] * 100, 1)
+
+# Scores with environmental data
+scores <- as.data.frame(pca_ds$x[, 1:2])
+scores <- cbind(scores, env_data_ds)
+
+# Check it worked
+str(scores)
+table(scores$treat)
+
+# Loadings
+loadings <- as.data.frame(pca_ds$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+# Scale arrows
+arrow_scale <- max(abs(scores[, 1:2])) * 0.8
+loadings[, 1:2] <- loadings[, 1:2] * arrow_scale
+
+# Plot
+FenSoil <- ggplot() +
+  geom_polygon(
+    data = scores %>% 
+      group_by(treat) %>% 
+      slice(chull(PC1, PC2)),
+    aes(x = PC1, y = PC2, fill = treat, group = treat),
+    alpha = 0.5,
+    color = NA
+  ) +
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, shape = treat, color = treat),
+    size = 3
+  ) +
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1*2, yend = PC2*2),
+    arrow = arrow(length = unit(0.25, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+  data = loadings,
+  aes(x = PC1*2, y = PC2*2, label = variable),
+  size = 3.5,
+  color = "black",
+  box.padding = 0.3,
+  point.padding = 0.2,
+  segment.color = "grey50"
+) +
+  scale_fill_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = c("C" = 16, "S" = 17)
+  ) +
+  xlab(paste0("PC1 (", pc1_var, "%)")) +
+  ylab(paste0("PC2 (", pc2_var, "%)")) +
+  labs(title = "Fen - Humus Layer") +
+  theme_classic()
+FenSoil
+```
+
+```{r}
+species_data_es <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "S", 
+                               c("carbonyl", "o_aromatic", "aromatic", 
+                                 "di_o_alkyl", "o_alkyl", "methoxy_n_alkyl",
+                                 "alkyl_c", "Alkyl/Carbohydrate","o_c_percent","o_n_percent", "c_n_ratio")]
+
+env_data_es <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "S", 
+                           c("treat"), drop = FALSE]
+
+# PCA
+pca_es <- prcomp(species_data_es, center = TRUE, scale. = TRUE)
+
+# Variance explained
+var_explained <- (pca_es$sdev^2) / sum(pca_es$sdev^2)
+pc1_var <- round(var_explained[1] * 100, 1)
+pc2_var <- round(var_explained[2] * 100, 1)
+
+# Scores with environmental data
+scores <- as.data.frame(pca_es$x[, 1:2])
+scores <- cbind(scores, env_data_es)
+
+# Check it worked
+str(scores)
+table(scores$treat)
+
+# Loadings
+loadings <- as.data.frame(pca_es$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+# Scale arrows
+arrow_scale <- max(abs(scores[, 1:2])) * 0.8
+loadings[, 1:2] <- loadings[, 1:2] * arrow_scale
+
+# Plot
+HeathSoil <- ggplot() +
+  geom_polygon(
+    data = scores %>% 
+      group_by(treat) %>% 
+      slice(chull(PC1, PC2)),
+    aes(x = PC1, y = PC2, fill = treat, group = treat),
+    alpha = 0.5,
+    color = NA
+  ) +
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, shape = treat, color = treat),
+    size = 3
+  ) +
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1*2, yend = PC2*2),
+    arrow = arrow(length = unit(0.25, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+  data = loadings,
+  aes(x = PC1*2, y = PC2*2, label = variable),
+  size = 3.5,
+  color = "black",
+  box.padding = 0.3,
+  point.padding = 0.2,
+  segment.color = "grey50"
+) +
+  scale_fill_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = c("C" = 16, "S" = 17)
+  ) +
+  xlab(paste0("PC1 (", pc1_var, "%)")) +
+  ylab(paste0("PC2 (", pc2_var, "%)")) +
+  labs(title = "Heath - Humus Layer") +
+  theme_classic()
+HeathSoil
+```
+
+```{r}
+species_data_el <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "L", 
+                               c("carbonyl", "o_aromatic", "aromatic", 
+                                 "di_o_alkyl", "o_alkyl", "methoxy_n_alkyl",
+                                 "alkyl_c", "Alkyl/Carbohydrate", "o_c_percent","o_n_percent", "c_n_ratio")]
+
+env_data_el <- carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "L", 
+                           c("treat"), drop = FALSE]
+
+# PCA
+pca_el <- prcomp(species_data_el, center = TRUE, scale. = TRUE)
+
+# Variance explained
+var_explained <- (pca_el$sdev^2) / sum(pca_el$sdev^2)
+pc1_var <- round(var_explained[1] * 100, 1)
+pc2_var <- round(var_explained[2] * 100, 1)
+
+# Scores with environmental data
+scores <- as.data.frame(pca_el$x[, 1:2])
+scores <- cbind(scores, env_data_el)
+
+# Check it worked
+str(scores)
+table(scores$treat)
+
+# Loadings
+loadings <- as.data.frame(pca_el$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+# Scale arrows
+arrow_scale <- max(abs(scores[, 1:2])) * 0.8
+loadings[, 1:2] <- loadings[, 1:2] * arrow_scale
+
+# Plot
+HeathLitter <- ggplot() +
+  geom_polygon(
+    data = scores %>% 
+      group_by(treat) %>% 
+      slice(chull(PC1, PC2)),
+    aes(x = PC1, y = PC2, fill = treat, group = treat),
+    alpha = 0.5,
+    color = NA
+  ) +
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, shape = treat, color = treat),
+    size = 3
+  ) +
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1*2, yend = PC2*1.5),
+    arrow = arrow(length = unit(0.25, "cm")),
+    color = "black"
+  ) +
+  geom_text_repel(
+  data = loadings,
+  aes(x = PC1*2, y = PC2*2, label = variable),
+  size = 3.5,
+  color = "black",
+  box.padding = 0.3,
+  point.padding = 0.2,
+  segment.color = "grey50"
+) +
+  scale_fill_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = c("C" = 16, "S" = 17)
+  ) +
+  xlab(paste0("PC1 (", pc1_var, "%)")) +
+  ylab(paste0("PC2 (", pc2_var, "%)")) +
+  labs(title = "Heath - Litter Layer") +
+  theme_classic()
+HeathLitter
+```
+
+```{r}
+species_data_x <- carbon_comp[carbon_comp$veg == "x" & carbon_comp$sample == "S", 
+                               c("carbonyl", "o_aromatic", "aromatic", 
+                                 "di_o_alkyl", "o_alkyl", "methoxy_n_alkyl",
+                                 "alkyl_c", "Alkyl/Carbohydrate", "o_c_percent","o_n_percent", "c_n_ratio")]
+
+env_data_x <- carbon_comp[carbon_comp$veg == "x" & carbon_comp$sample == "S", 
+                           c("treat"), drop = FALSE]
+
+# PCA
+pca_x <- prcomp(species_data_x, center = TRUE, scale. = TRUE)
+
+# Variance explained
+var_explained <- (pca_x$sdev^2) / sum(pca_x$sdev^2)
+pc1_var <- round(var_explained[1] * 100, 1)
+pc2_var <- round(var_explained[2] * 100, 1)
+
+# Scores with environmental data
+scores <- as.data.frame(pca_x$x[, 1:2])
+scores <- cbind(scores, env_data_x)
+
+# Check it worked
+str(scores)
+table(scores$treat)
+
+# Loadings
+loadings <- as.data.frame(pca_x$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+# Scale arrows
+arrow_scale <- max(abs(scores[, 1:2])) * 0.8
+loadings[, 1:2] <- loadings[, 1:2] * arrow_scale
+
+# Plot
+Ridge <- ggplot() +
+  geom_polygon(
+    data = scores %>% 
+      group_by(treat) %>% 
+      slice(chull(PC1, PC2)),
+    aes(x = PC1, y = PC2, fill = treat, group = treat),
+    alpha = 0.5,
+    color = NA
+  ) +
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, shape = treat, color = treat),
+    size = 3
+  ) +
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1*2, yend = PC2*1.5),
+    arrow = arrow(length = unit(0.25, "cm")),
+    color = "black"
+  )+
+  geom_text_repel(
+  data = loadings,
+  aes(x = PC1*2, y = PC2*2, label = variable),
+  size = 3.5,
+  color = "black",
+  box.padding = 0.3,
+  point.padding = 0.2,
+  segment.color = "grey50"
+) +
+  scale_fill_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c("C" = "orange", "S" = "skyblue"),
+    labels = c("Control", "Snowfence")
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = c("C" = 16, "S" = 17)
+  ) +
+  xlab(paste0("PC1 (", pc1_var, "%)")) +
+  ylab(paste0("PC2 (", pc2_var, "%)")) +
+  labs(title = "Heath - Litter Layer") +
+  theme_classic()
+Ridge
+```
+
+```{r}
+design <- "
+ABC
+DEF
+"
+
+pca_plot <-
+  FenLitter + HeathLitter + Ridge +
+  FenSoil   + HeathSoil   + guide_area() +
+  plot_layout(
+    design = design,
+    guides = "collect"
+  )  +
+  plot_annotation(
+    caption = "PCA for each Cegetation And Soil Horizon."
+  )
+pca_plot
+
+ggsave(
+  "../3_plots/pca_plot.png",
+  plot = pca_plot,
+  width = 10,
+  height = 6,
+)
+```
+
+Soil conditons
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+
+
+plot(plot_results(all_results$depth_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$bulk_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+carbon_comp %>% 
+  group_by(veg, sample) %>% 
+  summarise(avg_depth = mean(depth, na.rm=T),
+            sd_depth = sd(depth, na.rm=T))
+
+plot(plot_table(all_results$depth_results))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+carbon_comp %>% 
+  group_by(veg, sample) %>% 
+  summarise(avg_depth = mean(bulk, na.rm=T),
+            sd_depth = sd(bulk, na.rm=T))
+
+plot(plot_table(all_results$bulk_results))
+```
+
+```{r}
+soil_conditons <- rbind(bind_rows(
+  lapply(seq_along(all_results$depth_results), function(i) {
+  all_results$depth_results[[i]]$results %>% mutate(dataset = i)
+  })
+  ,
+  lapply(seq_along(all_results$bulk_results), function(i) {
+  all_results$bulk_results[[i]]$results %>% mutate(dataset = i)
+  })
+  )
+)
+
+write_xlsx(soil_conditons, "../4_tables/soil_conditons.xlsx")
+```
+
+```{r}
+c_n_dynamics <- combine_results(
+  all_results$o_c_percent_results,
+  all_results$o_n_percent_results,
+  all_results$c_n_ratio_results,
+  all_results$d13c_results,
+  all_results$d15n_results
+)
+
+c_n_dynamics <- c_n_dynamics %>% 
+  arrange(veg, layer)
+
+write_xlsx(c_n_dynamics, "../4_tables/c_n_dynamics.xlsx")
+```
+
+### Carbon Content
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$o_c_percent_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+
+
+plot(plot_table(all_results$o_c_percent_results))
+```
+
+C stock
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$c_stock_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$c_stock_results))
+```
+
+Nitrogen Cntent
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$o_n_percent_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$o_n_percent_results))
+```
+
+Nitrogen Stock
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$n_stock_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$n_stock_results))
+```
+
+C/N rato
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$c_n_ratio_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$c_n_ratio_results))
+```
+
+Alkyl Content
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$alkyl_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$alkyl_results))
+```
+
+Carbohydrate Content
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$carbohydrate_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$carbohydrate_results))
+```
+
+AlKyl/Carbohydrate Ratio
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$alkyl_carbo_ratio_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$alkyl_carbo_ratio_results))
+```
+
+d13c Ratio
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$d13c_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$d13c_results))
+```
+
+d15n ratio
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$d15n_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$d15n_results))
+```
+
+Alkyl Stock
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$alkyl_stock_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+plot(plot_table(all_results$alkyl_stock_results))
+```
+
+Carbohydrate Stock
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 12
+#| fig-width: 8
+plot(plot_results(all_results$o_alkyl_stock_results, carbon_comp))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+plot(plot_table(all_results$o_alkyl_stock_results))
+```
+
+```{r, include=T, message=F,warning=F}
+#| echo: false
+#| fig-height: 8
+#| fig-width: 12
+soil_data <- carbon_comp[,c(8:14,19,27,28,30,31,33)]
+group_data <- carbon_comp[,c(21:24)]
+```
+
+```{r}
+set.seed(123)
+soil_data <- carbon_comp[ carbon_comp$sample== "L",c("veg","treat",
+                                                "plot",
+                                                "sample",
+                                                "carbonyl",
+                                                "o_aromatic",
+                                                "aromatic",
+                                                "di_o_alkyl",
+                                                "o_alkyl",
+                                                "methoxy_n_alkyl",
+                                                "alkyl_c",
+                                                "Alkyl/Carbohydrate",
+                                                "o_n_percent",
+                                                "d15n",
+                                                "o_c_percent",
+                                                "d13c",
+                                                "c_n_ratio")]
+
+pca <- prcomp(soil_data[,-c(1,2,3,4)], center = TRUE, scale. = TRUE)
+print(pca)
+spca <- summary(pca)
+spca$importance[2,1]
+
+
+scores <- as.data.frame(pca$x)
+scores$sample <- soil_data$sample
+scores$veg <- soil_data$veg
+scores$treat <- soil_data$treat
+
+loadings <- as.data.frame(pca$rotation)
+
+var_explained <- c(spca$importance[2,1], spca$importance[2,2])
+
+loadings_scaled <- loadings %>% 
+  mutate(variable = rownames(loadings),
+          PC1 = PC1*5,
+          PC2 = PC2*5)
+
+centroids <- scores %>% 
+  group_by(sample, veg,treat) %>% 
+  summarise(
+    PC1 = mean(PC1),
+    PC2 = mean(PC2),
+    .groups = "drop"
+  )
+
+ggplot(scores, aes(x = PC1, y = PC2, color=veg, shape = sample))+
+  geom_polygon_pattern(
+    data = scores %>% 
+      group_by(sample, veg,treat) %>% 
+      slice(chull(PC1,PC2)),
+    aes(x = PC1, y = PC2,fill=treat, group = interaction(treat, veg), pattern = veg),
+    #pattern = "stripe",  # This creates the stripes
+    pattern_density = 0.1, # Adjust density of stripes
+    pattern_angle = 45,    # Angle of stripes
+    alpha = 0.2, 
+    color = "white", 
+    size = NA, 
+    inherit.aes = F
+  )+
+  scale_pattern_manual(
+    values = c("e" = "circle", "d" = "none"),
+    labels = c("Litter", "Soil"),
+    guide = "legend"  
+  ) +
+    # scale_fill_manual(
+    #   name = "",
+    #   values = c("C" = "orange", "S" = "skyblue"),
+    #   labels = c("Control", "Snowfence")
+    # )+
+  scale_color_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    )+
+  geom_point() +
+  geom_point(data = centroids, aes(x=PC1, y=PC2, color=veg,shape=sample),
+             size=5, fill=NA, stroke=1.2)+
+  geom_segment(data=loadings_scaled,
+               aes(x=0, y=0, xend=PC1,yend=PC2),
+               arrow=arrow(length= unit(0.2,"cm")),
+               color="black", inherit.aes = F)+
+  geom_text(data = loadings_scaled,
+            aes(x=PC1, y=PC2, label=variable),
+            color="black", vjust=-0.5, inherit.aes = F, size = 2.5)+
+  #facet_wrap(~sample)+
+  theme_classic() +
+  labs(
+    title="heath",
+    x = paste0("PC1 (", var_explained[1], "%)"),
+    y = paste0("PC2 (", var_explained[2], "%)")
+  )
+```
+
+```{r}
+soil_data <- carbon_comp[carbon_comp$veg=="d",c(8:14,19,27,28,30,31,33)]
+group_data <- carbon_comp[carbon_comp$veg=="d",c(21:24)]
+
+
+
+pca <- prcomp(soil_data, center = TRUE, scale. = TRUE)
+summary(pca)
+scores <- as.data.frame(pca$x)
+scores$sample <- group_data$sample
+scores$treat <- group_data$treat
+scores$veg <- group_data$veg
+
+loadings <- as.data.frame(pca$rotation)
+
+var_explained <- round(100*(pca$sdev^2/sum(pca$sdev)))
+
+loadings_scaled <- loadings %>% 
+  mutate(variable = rownames(loadings),
+          PC1 = PC1*5,
+          PC2 = PC2*5)
+
+centroids <- scores %>% 
+  group_by(sample, treat) %>% 
+  summarise(
+    PC1 = mean(PC1),
+    PC2 = mean(PC2),
+    .groups = "drop"
+  )
+
+ggplot(scores, aes(x = PC1, y = PC2, color=treat, shape = sample))+
+  geom_polygon(
+    data = scores %>% 
+      group_by(sample, treat) %>% 
+      slice(chull(PC1,PC2)),
+    aes(fill=treat, group = interaction(sample, treat)),
+    alpha=0.2,color=NA
+  )+
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    )+
+  scale_color_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    )+
+  geom_point() +
+  geom_point(data = centroids, aes(x=PC1, y=PC2, color=treat),
+             size=5,shape=5, fill=NA, stroke=1.2)+
+  geom_segment(data=loadings_scaled,
+               aes(x=0, y=0, xend=PC1,yend=PC2),
+               arrow=arrow(length= unit(0.2,"cm")),
+               color="black", inherit.aes = F)+
+  geom_text(data = loadings_scaled,
+            aes(x=PC1, y=PC2, label=variable),
+            color="black", vjust=-0.5, inherit.aes = F)+
+  theme_classic() +
+  facet_wrap(~veg, scales="free") +
+  labs(
+    title="Fen",
+    x = paste0("PC1 (", var_explained[1], "%)"),
+    y = paste0("PC2 (", var_explained[2], "%)")
+  )
+```
+
+```{r}
+soil_data <- carbon_comp[carbon_comp$veg=="x",c(8:14,19,27,28,30,31,33)]
+group_data <- carbon_comp[carbon_comp$veg=="x",c(21:24)]
+
+
+
+pca <- prcomp(soil_data, center = TRUE, scale. = TRUE)
+scores <- as.data.frame(pca$x)
+scores$sample <- group_data$sample
+scores$treat <- group_data$treat
+scores$veg <- group_data$veg
+
+loadings <- as.data.frame(pca$rotation)
+
+var_explained <- round(100*(pca$sdev^2/sum(pca$sdev^2)))
+
+loadings_scaled <- loadings %>% 
+  mutate(variable = rownames(loadings),
+          PC1 = PC1*5,
+          PC2 = PC2*5)
+
+centroids <- scores %>% 
+  group_by(sample, treat) %>% 
+  summarise(
+    PC1 = mean(PC1),
+    PC2 = mean(PC2),
+    .groups = "drop"
+  )
+
+ggplot(scores, aes(x = PC1, y = PC2, color=treat, shape = sample))+
+  geom_polygon(
+    data = scores %>% 
+      group_by(sample, treat) %>% 
+      slice(chull(PC1,PC2)),
+    aes(fill=treat, group = interaction(sample, treat)),
+    alpha=0.2,color=NA
+  )+
+    scale_fill_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    )+
+  scale_color_manual(
+      name = "",
+      values = c("C" = "orange", "S" = "skyblue"),
+      labels = c("Control", "Snowfence")
+    )+
+  geom_point() +
+  geom_point(data = centroids, aes(x=PC1, y=PC2, color=treat),
+             size=5,shape=5, fill=NA, stroke=1.2)+
+  geom_segment(data=loadings_scaled,
+               aes(x=0, y=0, xend=PC1,yend=PC2),
+               arrow=arrow(length= unit(0.2,"cm")),
+               color="black", inherit.aes = F)+
+  geom_text(data = loadings_scaled,
+            aes(x=PC1, y=PC2, label=variable),
+            color="black", vjust=-0.5, inherit.aes = F)+
+  theme_classic() +
+  facet_wrap(~veg, scales="free") +
+  labs(
+    title="Ridge",
+    x = paste0("PC1 (", var_explained[1], "%)"),
+    y = paste0("PC2 (", var_explained[2], "%)")
+  )
+```
+
+```{r}
+ggplot(carbon_comp, aes(x=eS, y=d13c, color=sample))+
+  geom_point(aes(shape=treat))+
+  geom_smooth(method="lm")+
+  facet_wrap(~veg)
+
+alk_model <- brm(Alkyl ~ d13c *  veg * sample,
+                 data = carbon_comp,
+                family = gaussian(),
+                chains = 4, iter = 8000, warmup = 2000, cores = 4,   # adjust cores to your machine
+    silent = TRUE, refresh = 0,
+    control = list(adapt_delta = 0.95, max_treedepth = 15)
+    )
+library(broom.mixed)
+
+tidy_alk <- broom.mixed::tidy(alk_model, 
+                              effects = "fixed",   # only fixed effects
+                              conf.level = 0.95)  # 95% credible intervals
+gt(tidy_alk)
+```
+
+```{r}
+ggplot(carbon_comp, aes(y=Alkyl, x=dS, color=as.factor(plot)))+
+  geom_point(aes(shape=treat))+
+  geom_line()+
+  facet_wrap(sample~veg)
+
+library(dplyr)
+
+df_diff <- carbon_comp %>%
+  group_by(plot, sample, veg, treat) %>%
+  summarise(Alkyl_mean = mean(Alkyl, na.rm = TRUE), .groups = "drop",
+            dS_mean = mean(dS, na.rm = TRUE), .groups = "drop") %>% 
+  pivot_wider(
+    names_from = treat,
+    values_from = Alkyl_mean,
+    names_glue = "{group}_alkyl"
+  ) %>% 
+  pivot_wider(
+    names_from = treat,
+    values_from = dS_mean,
+    names_glue = "{group}_dS"
+  ) %>% 
+
+
+```
+
+```{r}
+ggplot(carbon_comp, aes(y=c_n_ratio, x=dS, color=as.factor(plot)))+
+  geom_point(aes(shape=treat))+
+  geom_line()+
+  facet_wrap(sample~veg)
+```
+
+```{r}
+plant_biomass <- combine_results(
+  all_results$F_results,
+  all_results$G_results,
+  all_results$dS_results,
+  all_results$eS_results
+)
+
+plant_biomass <- plant_biomass %>% 
+  arrange(veg, layer)
+
+write_xlsx(plant_biomass, "../4_tables/plant_biomass.xlsx")
+```
+
+```{r}
+som_quality <- combine_results(
+  all_results$carbonyl_results,
+  all_results$o_aromatic_results,
+  all_results$aromatic_results,
+  all_results$di_o_alkyl_results,
+  all_results$o_alkyl_results,
+  all_results$methoxy_n_alkyl_results,
+  all_results$alkyl_results
+)
+
+som_quality <- som_quality %>% 
+  arrange(veg, layer)
+
+write_xlsx(som_quality, "../4_tables/som_quality.xlsx")
+```
+
+```{r}
+stock_table <- combine_results(
+  all_results$c_stock_results,
+  all_results$n_stock_results,
+  all_results$alkyl_stock_results
+)
+
+stock_table <- stock_table %>% 
+  arrange(veg, layer)
+
+write_xlsx(stock_table, "../4_tables/stock_table.xlsx")
+```
+
+```{r}
+ggplot(carbon_comp[carbon_comp$veg == "e" & carbon_comp$sample == "L",],
+       aes(x=dS,y=c_n_ratio,shape=treat,size=dS))+
+  geom_point()+
+    
+    geom_line(aes( color =as.factor(plot),
+                   group=as.factor(plot)),
+              alpha=0.4,
+              size=0.5)
+  
+```
+
+```{r}
+carbon_comp %>% 
+  filter(veg=="x") %>% 
+  summarise(avg_bulk = mean(bulk, na.rm=T),
+            sd_bulk = sd(bulk, na.rm = T),
+            avg_depth = mean(depth, na.rm=T),
+            sd_depth = sd(depth, na.rm = T))
+```
