@@ -21,11 +21,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ## packages
 
 ```{r}
+# utilities
 library(broom)
 library(purrr)
 library(tidyverse)
 library(openxlsx)
 
+# modelling:
 library(glmmTMB)
 library(brms)
 library(tidybayes)
@@ -335,7 +337,6 @@ ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height
 ```
 
 ### data prep
-
 ```{r}
 
 vag_nig_sums <- leaf_biomass_pinpoint %>%
@@ -401,7 +402,6 @@ leaf_results <- leaf_results[12,] %>%
 ```
 
 ## stem biomass
-
 ```{r}
 # plotting leaf biomass vs pinpoint
 stem_biomass_pinpoint %>% 

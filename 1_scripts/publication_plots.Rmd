@@ -33,7 +33,8 @@ conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
 
-# Fig x. community composition
+# main
+## Fig 2. community composition
 ```{r}
 # community data
 community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
@@ -91,22 +92,44 @@ hull_data <- meta_nmds %>% # find convex hulls
   slice(chull(NMDS1, NMDS2))
 
 pa <- ggplot() +
-  geom_point(data = meta_nmds, aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment), size = 3, stroke = 1) + # add the point markers 
-  geom_polygon(data = hull_data, aes(x = NMDS1, y = NMDS2, color = habitat, fill = habitat, linetype = treatment), alpha = 0.30) +
+  geom_point(
+    data = meta_nmds,
+    aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment),
+    size = 3,
+    stroke = 1
+  ) + # add the point markers
+  geom_polygon(
+    data = hull_data,
+    aes(
+      x = NMDS1,
+      y = NMDS2,
+      color = habitat,
+      fill = habitat,
+      linetype = treatment
+    ),
+    alpha = 0.30
+  ) +
   scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_fill_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
   scale_shape_manual(values = c(16, 8)) +
-  geom_text(data = spec_nmds, aes(x = NMDS1, y = NMDS2, label = label), alpha = 0.5) +  # add the species labels
-  #geom_line(data = meta_nmds, aes(x = NMDS1, y = NMDS2, group = site_id), alpha = 0.3) + 
+  geom_text(
+    data = spec_nmds,
+    aes(x = NMDS1, y = NMDS2, label = label),
+    alpha = 0.5
+  ) + # add the species labels
+  #geom_line(data = meta_nmds, aes(x = NMDS1, y = NMDS2, group = site_id), alpha = 0.3) +
   annotate("text", x = -1, y = 1.2, label = "stress = 0.091") +
   #xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
   theme_classic() +
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
-        strip.background = element_rect(color = "black", size = 1),
-        legend.position = "bottom",
-        legend.box = "vertical",     
-        legend.box.just = "left", 
-        legend.margin = margin(t = -8)); pa
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    strip.background = element_rect(color = "black", size = 1),
+    legend.position = "bottom",
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.margin = margin(t = -8)
+  )
+pa
 ```
 
 ```{r}
@@ -137,106 +160,7 @@ ggsave("3_output/1_figures/publication_ready/community_composition.tif", height 
 
 ```
 
-
-# Fig x. CWMs 
-```{r}
-boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
-
-facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
-trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
-names(trait_labs) <- facet_order
-
-# get model outputs (pairwise)
-boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") %>% 
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
-  mutate(trait = factor(trait, levels = facet_order),
-         significance = if_else(significance == "", "ns", significance),
-         treatment = "control") %>% 
-  select(trait, habitat, treatment, significance)
-  
-trait_ranges <- boot_traits_bm %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
-  group_by(trait) %>%
-  summarise(
-    trait_min = min(mean, na.rm = TRUE),
-    trait_max = max(mean, na.rm = TRUE),
-    trait_range = trait_max - trait_min,
-    .groups = "drop"
-  )  
-
-sig_positions <- boot_traits_bm %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
-  left_join(trait_ranges, by = "trait") %>%
-  group_by(trait, habitat) %>%
-  summarise(
-    q1 = quantile(mean, 0.25, na.rm = TRUE),
-    q3 = quantile(mean, 0.75, na.rm = TRUE),
-    iqr = q3 - q1,
-    lower_whisker = max(q1 - 1.5 * iqr, min(mean, na.rm = TRUE)),
-    upper_whisker = min(q3 + 1.5 * iqr, max(mean, na.rm = TRUE)),
-    # Use actual max or whisker, whichever is higher
-    y_base = max(upper_whisker, na.rm = TRUE),
-    y_pos = y_base + (trait_range * 0.13),
-    .groups = "drop"
-  ) %>% 
-  left_join(boot_traits_lm) %>% 
-  distinct()
-```
-
-
-```{r}
-pa <- boot_traits_bm %>% 
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
-  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
-  geom_boxplot() + 
-  geom_text(data = sig_positions, aes(y = y_pos, label = significance), 
-                  position = position_dodge(width = 0)) +
-  scale_fill_manual(values = c("#999999", "#4da6ff")) +
-  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))
-  ) +
-  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
-             labeller = as_labeller(trait_labs, label_parsed)) + 
-  labs(x = "Habitat", y = "Community weighted mean") + 
-  theme_classic() +
-  theme(panel.spacing = unit(.0, "lines"),
-        panel.border = element_rect(color = "black", fill = NA, size = 1),
-        legend.position = "bottom",
-        legend.margin = margin(t = -8),
-        legend.title = element_blank(),
-        strip.background = element_rect(color = "black", size = 1),
-        axis.text.x = element_text(angle = 25, hjust = 1))
-
-# add variance partitioning 
-varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
-
-pb <- varpart_r2 %>% 
-  filter(r2 >= 0) %>%
-  ggplot(aes(y = trait, x = r2, fill = var_part)) +
-  geom_col(position = "fill")  + 
-  scale_fill_manual(values = c("#4da6ff", "#999999", "#ff6666")) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") + 
-  labs(y = "Trait", x = parse(text = "R^2")) + 
-  theme_classic() +
-  theme(legend.position = "bottom",
-        legend.margin = margin(t = -8), 
-        legend.title = element_blank(), 
-        axis.title.y.right = element_text(angle = 90), 
-        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
-  guides(fill = guide_legend(reverse = TRUE)); pb
-```
-
-```{r}
-ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c(5.5, 2.5))
-
-#ggsave("3_output/1_figures/publication_ready/trait_means.tif", height = 4, width = 8)
-```
-
-# Fig x. multivariate traits
+## Fig 3. multivariate traits
 ```{r}
 boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
 
@@ -364,3 +288,169 @@ ggsave("3_output/1_figures/publication_ready/multivariate_traits.tif", height = 
 rm(species_scores, site_scores, trait_scores_a, trait_labs_a, trait_scores_b, trait_labs_b) # cleanup
 ```
 
+## Fig 4. CWMs 
+```{r}
+boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
+
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
+names(trait_labs) <- facet_order
+
+# get model outputs (pairwise)
+boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order),
+         significance = if_else(significance == "", "ns", significance),
+         treatment = "control") %>% 
+  select(trait, habitat, treatment, significance)
+  
+trait_ranges <- boot_traits_bm %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
+  group_by(trait) %>%
+  summarise(
+    trait_min = min(mean, na.rm = TRUE),
+    trait_max = max(mean, na.rm = TRUE),
+    trait_range = trait_max - trait_min,
+    .groups = "drop"
+  )  
+
+sig_positions <- boot_traits_bm %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
+  left_join(trait_ranges, by = "trait") %>%
+  group_by(trait, habitat) %>%
+  summarise(
+    q1 = quantile(mean, 0.25, na.rm = TRUE),
+    q3 = quantile(mean, 0.75, na.rm = TRUE),
+    iqr = q3 - q1,
+    lower_whisker = max(q1 - 1.5 * iqr, min(mean, na.rm = TRUE)),
+    upper_whisker = min(q3 + 1.5 * iqr, max(mean, na.rm = TRUE)),
+    # Use actual max or whisker, whichever is higher
+    y_base = max(upper_whisker, na.rm = TRUE),
+    y_pos = y_base + (trait_range * 0.13),
+    .groups = "drop"
+  ) %>% 
+  left_join(boot_traits_lm) %>% 
+  distinct()
+```
+
+
+```{r}
+pa <- boot_traits_bm %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  geom_text(data = sig_positions, aes(y = y_pos, label = significance), 
+                  position = position_dodge(width = 0)) +
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))
+  ) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
+             labeller = as_labeller(trait_labs, label_parsed)) + 
+  labs(x = "Habitat", y = "Community weighted mean") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        legend.title = element_blank(),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+# add variance partitioning 
+varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
+
+pb <- varpart_r2 %>% 
+  filter(r2 >= 0) %>%
+  ggplot(aes(y = trait, x = r2, fill = var_part)) +
+  geom_col(position = "fill")  + 
+  scale_fill_manual(values = c("#4da6ff", "#999999", "#ff6666")) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") + 
+  labs(y = "Trait", x = parse(text = "R^2")) + 
+  theme_classic() +
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -8), 
+        legend.title = element_blank(), 
+        axis.title.y.right = element_text(angle = 90), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
+  guides(fill = guide_legend(reverse = TRUE)); pb
+```
+
+```{r}
+ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c(5.5, 2.5))
+
+#ggsave("3_output/1_figures/publication_ready/trait_means.tif", height = 4, width = 8)
+```
+
+# ESM
+## Fig sx. biomass brms
+```{r}
+#| label: plot data
+# only hurdle_gamma in case of zeros
+gamma0_draws <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F")  
+
+gamma0_est <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F")  
+
+gamma_draws <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
+  anti_join(gamma0_draws, by = c("treatment", "habitat", "group"))
+gamma_est <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+  anti_join(gamma0_est, by = c("treatment", "habitat", "group"))
+
+est <- bind_rows(gamma0_est, gamma_est)
+draws <- bind_rows(gamma0_draws, gamma_draws) %>% 
+  left_join(est %>% 
+              select(treatment:group, .upper)) %>% 
+  filter(value <= (.upper * 1.2))
+```
+
+```{r}
+#| label: biomass brm violin plot
+leaf_bm_w <- leaf_bm %>%
+  pivot_wider(names_from = group, values_from = total_bm) %>%
+  mutate(total_bm = rowSums(across(where(is.numeric)))) %>%
+  pivot_longer(cols = `F`:total_bm, names_to = "group", values_to = "total_bm")
+
+ggplot() +
+  geom_violin(
+    data = draws, # posterior distribution
+    aes(x = treatment, y = value, fill = treatment), #trim = TRUE,
+    color = "white",
+    alpha = 0.4
+  ) +
+  geom_point(
+    data = leaf_bm_w,
+    aes(x = treatment, y = total_bm, color = treatment)
+  ) +
+  geom_point(
+    data = est, # estimated mean
+    aes(x = treatment, y = value),
+    alpha = 0.4
+  ) +
+  geom_errorbar(
+    data = est, # 95% CIs
+    aes(ymin = .lower, ymax = .upper, x = treatment),
+    alpha = 0.4
+  ) +
+  scale_color_manual(
+    values = c("#999999", "#4da6ff")
+  ) +
+  scale_fill_manual(
+    values = c("#999999", "#4da6ff")
+  ) +
+  facet_grid2(
+    rows = vars(habitat),
+    cols = vars(group),
+    scales = "free_y",
+    independent = "y"
+  ) +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1)) +
+  theme_classic()
+```
