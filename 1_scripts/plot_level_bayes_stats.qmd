@@ -10,6 +10,7 @@ editor: visual
 ## Packages
 
 ```{r}
+#| label: read packages
 library(readr); library(readxl)
 
 library(tidyverse)
@@ -39,10 +40,9 @@ library(openxlsx)
 ### Import
 
 ```{r}
-# community data
+#| label: community data and plot data
 community <- read_csv("2_data/2_clean/sf_community.csv")
 
-# plot data
 plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   select(plot:treatment)
 ```
@@ -50,6 +50,7 @@ plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.x
 ### Wrangling
 
 ```{r}
+#| label: per plot leaf bm
 leaf_bm <- community %>% 
   filter(part == "leaf") %>%
   na.omit() %>% 
@@ -75,7 +76,8 @@ plot_bm_ls[[2]]
 
 Statistics at a plot level with brms (bayesian statistics). Chosen due to low sample size
 
-```{r model_brms, warning=FALSE,message=F}
+```{r}
+#| label: brm function
 #| echo: false
 # options(brms.backend = NULL) <- NEVER PLAY WITH THIS AGAIN!
 fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
@@ -236,6 +238,7 @@ fit_model <- function(d, growth_form = "growth_form", quiet = TRUE) {
 ```
 
 ```{r}
+#| label: results function
 # -----------------------
 # SHOW RESULTS FUNCTIONS
 # -----------------------
@@ -261,6 +264,7 @@ view_diagnostics <- function(all_results){
 ## Biomass
 
 ```{r}
+#| label: eyeball-plot
 leaf_bm %>% 
   ggplot(aes(x = treatment, y = total_bm)) + 
   geom_point() +
@@ -270,25 +274,34 @@ leaf_bm %>%
 ### Model test
 
 ```{r}
-fit1 <- brm(eS ~ treatment + (1 | site), 
+#| label: parameter scope
+fit1 <- brm(G ~ treatment + (1 | site), 
             family = gaussian(), 
-            data = plot_bm_ls[[2]])
+            data = plot_bm_ls[[3]])
 loo1 <- loo(fit1)
 
-fit2 <- brm(eS ~ treatment + (1 | site),
+fit2 <- brm(G ~ treatment + (1 | site),
             family = hurdle_lognormal(),
-            data = plot_bm_ls[[2]])
+            data = plot_bm_ls[[3]])
 loo2 <- loo(fit2)
 
-fit3 <- brm(eS ~ treatment + (1 | site),
+fit3 <- brm(G ~ treatment + (1 | site), 
             family = Gamma(link = "log"),
-            data = plot_bm_ls[[2]])
+            data = plot_bm_ls[[3]] %>% 
+              mutate(across(where(is.numeric),
+                            ~ ifelse(.x == 0, 0.0001, .x))))
 loo3 <- loo(fit3)
 
-loo_compare(loo1, loo2, loo3)
+fit4 <- brm(G ~ treatment + (1 | site), # best
+            family = hurdle_gamma(),
+            data = plot_bm_ls[[3]])
+loo4 <- loo(fit4)
+
+loo_compare(loo1, loo2, loo3, loo4)
 ```
 
 ```{r}
+#| label: biomass brms
 gr_frms <- colnames(plot_bm_ls[[1]][,sapply(plot_bm_ls[[1]],is.numeric)])
 brm_fit_ls <- list()
 
@@ -304,7 +317,7 @@ for(gr_frm in gr_frms) {
 ### Export
 
 ```{r}
-# model statistics
+#| label: model statistics
 bm_brm_results <- map_dfr(names(brm_fit_ls), function(fit_name) {
   map_dfr(brm_fit_ls[[fit_name]], function(habitat_result) {
     habitat_result$results
@@ -334,6 +347,7 @@ bm_brm_post <- map_dfr(names(brm_fit_ls), function(fit_name) {
 ```
 
 ```{r}
+#| label: model export
 # write results to excel file
 wb <- createWorkbook()
 addWorksheet(wb, "statistics")
@@ -355,17 +369,18 @@ saveWorkbook(wb, "3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", overwri
 ### Plotting
 
 ```{r}
+#| label: plot data
 # only hurdle_gamma in case of zeros
 gamma0_draws <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
   filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F" |
-           habitat == "ridge" & group == "F" |
-           habitat == "ridge" & group == "G") 
+           habitat == "heath" & group == "F") #|
+           # habitat == "ridge" & group == "F" |
+           # habitat == "ridge" & group == "G") 
 gamma0_est <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
   filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F" |
-           habitat == "ridge" & group == "F" |
-           habitat == "ridge" & group == "G") 
+           habitat == "heath" & group == "F") #|
+           # habitat == "ridge" & group == "F" |
+           # habitat == "ridge" & group == "G") 
 
 gamma_draws <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
   anti_join(gamma0_draws, by = c("treatment", "habitat", "group"))
@@ -378,15 +393,16 @@ draws <- bind_rows(gamma0_draws, gamma_draws) %>%
               select(treatment:group, .upper)) %>% 
   filter(value <= (.upper * 1.2))
 
-# hurdle_gamma for everything
-est <- read_excel("3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", sheet = "marginal_estimates")
-draws <- read_excel("3_output/2_statistics/biomass/leafBM_lognrm_brm.xlsx", sheet = "post_draws") %>% 
-  left_join(est %>% 
-              select(treatment:group, .upper)) %>% 
-  filter(value <= (.upper * 1.2))
+# # gamma for everything
+# est <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates")
+# draws <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>%
+#   left_join(est %>%
+#               select(treatment:group, .upper)) %>%
+#   filter(value <= (.upper * 1.2))
 ```
 
 ```{r}
+#| label: biomass brm violin plot
 leaf_bm_w <- leaf_bm %>% 
   pivot_wider(names_from = group, values_from = total_bm) %>% 
   mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
