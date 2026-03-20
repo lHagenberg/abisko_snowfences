@@ -9,7 +9,7 @@ knit: (function(input, ...) {
       output_dir = here::here("outputs")
     )
   })
-cache: no
+cache: false 
 ---
 
 ```{r setup, include=FALSE}
@@ -18,10 +18,20 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # setup
 ```{r}
-require(tidyverse)
-require(rtry)
+library(tidyverse)
+library(rtry)
+library(osfr)
 ``` 
 
+```{r}
+#| label: connect to OSF
+rawData <- osf_retrieve_node("xw3hy")  
+
+rawData %>% 
+  osf_ls_files() %>% 
+  filter(name == "raw") %>% 
+  osf_ls_files()
+```
 # data cleaning
 ## pinpoint data
 ```{r read data}
@@ -266,9 +276,46 @@ try_data_filtered %>%
   write.csv("2_data/2_clean/traits/try_traits.csv")
 ```
 
+# soil data
+## soil chem comp
+```{r}
+#| label: pull data from OSF
+if (!file.exists("2_data/1_raw/soil/carbon_comp.xlsx")) {
+  if (!dir.exists("2_data/1_raw/soil")) {
+    dir.create("2_data/1_raw/soil", recursive = TRUE)
+  }
+
+  rawData %>%
+    osf_ls_files() %>%
+    filter(name == "raw") %>%
+    osf_ls_files() %>%
+    filter(name == "soil") %>%
+    osf_ls_files() %>%
+    osf_download("2_data/1_raw/soil")
+}
+``` 
+
+## soil temp
+```{r}
+#| label: pull data from osf
+if (!file.exists("2_data/1_raw/clim/seasonal_soil_temperatures.csv")) {
+  if (!dir.exists("2_data/1_raw/clim")) {
+    dir.create("2_data/1_raw/clim", recursive = TRUE)
+  }
+
+  rawData %>%
+    osf_ls_files() %>%
+    filter(name == "raw") %>%
+    osf_ls_files() %>%
+    filter(name == "clim") %>%
+    osf_ls_files() %>%
+    osf_download("2_data/1_raw/clim")
+}
+```
 
 # upload to osf
 ```{r}
+
 
 ```
 

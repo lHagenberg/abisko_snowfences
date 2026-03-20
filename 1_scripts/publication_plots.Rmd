@@ -9,7 +9,7 @@ knit: (function(input, ...) {
       output_dir = here::here("outputs")
     )
   })
-cache: no
+cache: false
 ---
 
 ```{r setup, include=FALSE}
@@ -19,9 +19,11 @@ knitr::opts_chunk$set(echo = TRUE)
 # Setup
 ## packages
 ```{r}
+library(openxlsx)
 library(vegan)
 
 library(ggplot2)
+library(ggh4x)
 library(ggrepel)
 library(ggpubr)
 
@@ -388,8 +390,22 @@ ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c
 
 # ESM
 ## Fig sx. biomass brms
+
 ```{r}
 #| label: plot data
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+  select(plot:treatment)
+
+leaf_bm <- community %>% 
+  filter(part == "leaf") %>%
+  na.omit() %>% 
+  group_by(plot, group) %>% 
+  summarise(total_bm = sum(biomass)) %>% 
+  ungroup() %>% 
+  left_join(plot_data) %>% 
+  relocate(habitat:treatment, .after = plot)
+
+# brm data
 # only hurdle_gamma in case of zeros
 gamma0_draws <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
   filter(habitat == "fen" & group == "eS" | 
