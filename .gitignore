@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+
+2_data
+3_output
+1_scripts/other/
+abisko_snowfences.Rproj
