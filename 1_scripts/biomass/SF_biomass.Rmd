@@ -9,7 +9,7 @@ knit: (function(input, ...) {
       output_dir = here::here("outputs")
     )
   })
-cache: no
+cache: false
 ---
 
 ```{r setup, include=FALSE}
@@ -24,7 +24,7 @@ knitr::opts_chunk$set(echo = TRUE)
 pkgs <- c(
   # utilities:
   "broom",
-  "purr",
+  "purrr",
   "tidyverse",
   "openxlsx",
   # modelling:
@@ -36,8 +36,8 @@ pkgs <- c(
   "conflicted"
 )
 
-#install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
-lapply(pkgs, library, character.only = TRUE)
+install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+purrr::walk(pkgs, library, character.only = TRUE); rm(pkgs)
 
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
@@ -72,19 +72,13 @@ biomass_pinpoint <- read.csv("2_data/1_raw/biomass/SF_biomass_pinpoint_2025.csv"
   mutate(across(everything(), ~replace_na(., 0))) %>% 
   pivot_longer(cols = D1SF:X5C, names_to = "plot", values_to = "hits") %>% 
   select(plot, species, part, hits)
-```
 
-```{r}
 spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
-```
 
-```{r}
 biomass <- read.csv("2_data/1_raw/biomass/SF_biomass_2025.csv") %>%
   mutate(dweight = as.numeric(dweight)) %>% 
   select(!comment)
-```
 
-```{r}
 plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   select(plot:treatment)
 ```
@@ -92,6 +86,7 @@ plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.x
 # data_cleaning
 
 ```{r}
+#| label: total empetrum from sorted fraction
 emp_biomass <- biomass %>% 
   filter(species == "Empetrum nigrum") %>%
   mutate(species_part = paste(species, part, sep = "_")) %>% 
@@ -132,9 +127,7 @@ leaf_biomass <- biomass_clean %>%
 stem_biomass <- biomass_clean %>% 
   select(plot, spec, part, dweight) %>% 
   filter(part == "stem")
-```
 
-```{r}
 biomass_clean <- biomass_clean %>% 
   select(!species) %>% 
   left_join(spec_list) %>% 
@@ -154,7 +147,7 @@ rawdata %>%
 ```
 
 ```{r}
-# get shortened species names
+#| label: get shortened species names
 biomass_pinpoint$spec <- NA
 
 for (i in 1:nrow(biomass_pinpoint)) {
@@ -175,7 +168,7 @@ stem_biomass_pinpoint <- biomass_pinpoint %>%
 ```
 
 ```{r}
-# merge biomass subplot pinpoint and biomass data
+#| label: merge biomass subplot pinpoint and biomass data
 leaf_biomass_pinpoint <- leaf_biomass_pinpoint %>% 
   full_join(leaf_biomass, by = c("plot", "spec", "part")) %>% 
   mutate(hits_noNA = replace_na(hits, 1)) 
@@ -680,6 +673,10 @@ ggsave("3_output/1_figures/biomass/sf_leaf_biomass_25.tif", height = 4, width = 
 ```
 
 ```{r}
+community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
+  mutate(site_id = str_sub(plot, 1, 2)) %>% 
+  select(plot:site, site_id, everything())
+
 community %>% 
   filter(!is.na(group), 
          part == "leaf") %>% 

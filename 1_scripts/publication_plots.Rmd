@@ -19,18 +19,22 @@ knitr::opts_chunk$set(echo = TRUE)
 # Setup
 ## packages
 ```{r}
-library(openxlsx)
-library(vegan)
+pkgs <- c(
+  # utilities:
+  "openxlsx",
+  "tidyverse",
+  "conflicted",
+  # modelling:
+  "vegan",
+  # plotting:
+  "ggh4x",
+  "ggrepel",
+  "ggpubr"
+)
 
-library(ggplot2)
-library(ggh4x)
-library(ggrepel)
-library(ggpubr)
+install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+purrr::walk(pkgs, library, character.only = TRUE); rm(pkgs)
 
-library(tidyverse)
-
-
-library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
@@ -38,7 +42,7 @@ conflict_prefer("filter", "dplyr")
 # main
 ## Fig 2. community composition
 ```{r}
-# community data
+#| label: data import
 community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
   mutate(site_id = str_sub(plot, 1, 2)) %>% 
   select(plot:site, site_id, everything())
@@ -66,6 +70,7 @@ meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.x
 ```
 
 ```{r NMDS, include = FALSE}
+#| label: calculate distance matrices
 bm_dist <- leaf_bm %>% 
   vegdist(method = "bray", na.rm = TRUE)
 
@@ -88,6 +93,7 @@ meta_nmds <- bm_nmds %>%
 ```
 
 ```{r NMDS plot (country), echo = FALSE}
+#| label: fig 2a. leaf bm NMDS
 hull_data <- meta_nmds %>% # find convex hulls
   group_by(habitat, treatment) %>% # for each combination of country and habitat
   arrange(NMDS1, NMDS2) %>%
@@ -135,6 +141,7 @@ pa
 ```
 
 ```{r}
+#| label: fig 2b. leaf bm totals
 pb <- community %>% 
   filter(!is.na(group), 
          part == "leaf") %>% 
@@ -156,14 +163,14 @@ pb <- community %>%
 ```
 
 ```{r NMDS plot (country), echo = FALSE}
+#| label: export figure
 ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), widths = c(4, 3))
-
 ggsave("3_output/1_figures/publication_ready/community_composition.tif", height = 4.5, width = 7)
-
 ```
 
 ## Fig 3. multivariate traits
 ```{r}
+#| label: import bootstrapped traits
 boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
 
 plot_traits <- boot_traits_bm %>% 
@@ -187,7 +194,7 @@ trait_scores_a <- as.data.frame(plot_pca$CA$v[, 1:2]) %>%
          PC2 = PC2 * -1)
 trait_scores_a$trait <- as.factor(rownames(trait_scores_a)) 
 
-site_scores <- boot_traits %>%
+site_scores <- boot_traits_bm %>%
   select(plot:site) %>% 
   unique() %>% 
   rename(ID = plot) %>% 
@@ -197,6 +204,7 @@ site_scores <- boot_traits %>%
 ```
 
 ```{r}
+#| label: fig3a. CWM PCA
 trait_labs_a <- c("C:N~ratio", "LDMC", "SLA", "delta^13*C", "delta^15*N", "Plant~height", "'%'~C",  "'%'~N")
 names(trait_labs_a) <- c("CN_ratio", "LDMC", "SLA", "d13C", "d15N", "height", "wC",  "wN")
 
@@ -226,6 +234,9 @@ pa <- ggplot() +
 ```
 
 ```{r}
+#| label: calculate species PCAs
+traits <- read_csv("2_data/2_clean/traits/traits_w.csv")
+
 species_traits <- traits %>% 
   filter(complete.cases(.)) %>% 
   group_by(species) %>% 
@@ -258,6 +269,7 @@ species_scores <- species_scores %>%
 ```
 
 ```{r}
+#| label: species level PCAs 
 trait_labs_b <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
 names(trait_labs_b) <- c("plant_height", "LDMC", "SLA",  "wN", "d15N", "wC", "d13C", "CN_ratio")
 
@@ -283,6 +295,7 @@ pb <- ggplot() +
 ```
 
 ```{r}
+#| label: export figure
 ggarrange(pa, pb, ncol = 2, labels = c("a", "b"))
 
 ggsave("3_output/1_figures/publication_ready/multivariate_traits.tif", height = 5, width = 9)
@@ -292,6 +305,7 @@ rm(species_scores, site_scores, trait_scores_a, trait_labs_a, trait_scores_b, tr
 
 ## Fig 4. CWMs 
 ```{r}
+#| label: import bootstrapped CWMs
 boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
 
 facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
@@ -339,6 +353,7 @@ sig_positions <- boot_traits_bm %>%
 
 
 ```{r}
+#| label: fig 4a. bm weighted CWMs
 pa <- boot_traits_bm %>% 
   filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
   mutate(trait = factor(trait, levels = facet_order)) %>%
@@ -364,7 +379,10 @@ pa <- boot_traits_bm %>%
 
 # add variance partitioning 
 varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
+```
 
+```{r}
+#| label: fig 4b. variance partitioning
 pb <- varpart_r2 %>% 
   filter(r2 >= 0) %>%
   ggplot(aes(y = trait, x = r2, fill = var_part)) +
@@ -381,8 +399,8 @@ pb <- varpart_r2 %>%
         panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
   guides(fill = guide_legend(reverse = TRUE)); pb
 ```
-
 ```{r}
+#| label: export figure
 ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c(5.5, 2.5))
 
 #ggsave("3_output/1_figures/publication_ready/trait_means.tif", height = 4, width = 8)
@@ -407,17 +425,17 @@ leaf_bm <- community %>%
 
 # brm data
 # only hurdle_gamma in case of zeros
-gamma0_draws <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
+gamma0_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
   filter(habitat == "fen" & group == "eS" | 
            habitat == "heath" & group == "F")  
 
-gamma0_est <- read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+gamma0_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
   filter(habitat == "fen" & group == "eS" | 
            habitat == "heath" & group == "F")  
 
-gamma_draws <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
+gamma_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
   anti_join(gamma0_draws, by = c("treatment", "habitat", "group"))
-gamma_est <- read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+gamma_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
   anti_join(gamma0_est, by = c("treatment", "habitat", "group"))
 
 est <- bind_rows(gamma0_est, gamma_est)
@@ -429,6 +447,14 @@ draws <- bind_rows(gamma0_draws, gamma_draws) %>%
 
 ```{r}
 #| label: biomass brm violin plot
+sig_vals <- rep(c("ns", NA), 15)
+sig_vals[c(15, 17)] <- "*" # headth dS and eS are siggnificant
+est$sig_vals <- sig_vals
+rm(sig_vals)
+est <- est %>%
+  mutate(sig_pos = .upper * 1.3)
+
+
 leaf_bm_w <- leaf_bm %>%
   pivot_wider(names_from = group, values_from = total_bm) %>%
   mutate(total_bm = rowSums(across(where(is.numeric)))) %>%
@@ -455,6 +481,11 @@ ggplot() +
     aes(ymin = .lower, ymax = .upper, x = treatment),
     alpha = 0.4
   ) +
+  geom_text(
+    data = est,
+    aes(x = treatment, y = sig_pos, label = sig_vals),
+    position = position_dodge(width = 0)
+  ) +
   scale_color_manual(
     values = c("#999999", "#4da6ff")
   ) +
@@ -467,6 +498,9 @@ ggplot() +
     scales = "free_y",
     independent = "y"
   ) +
-  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 1)) +
-  theme_classic()
+  theme_classic() +
+  theme(
+    legend.position = "bottom",
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
 ```
