@@ -20,9 +20,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 #| label: load packages
-library(tidyverse)
-library(rtry)
-library(osfr)
+pkgs <- c("tidyverse", "rtry", "osfr")
+
+#install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+lapply(pkgs, library, character.only = TRUE)
 ```
 
 ```{r}
@@ -35,6 +36,7 @@ rawData <- osf_retrieve_node("xw3hy")
 ## pinpoint data
 
 ```{r read data}
+#| label: read data
 vp_l <- readxl::read_excel("2_data/1_raw/community/2025/SF_pinpoint_2025.xlsx", sheet = "VP") %>% 
   slice(1:(n() - 4)) %>% 
   pivot_longer(-c(part, species) ,names_to = "plot", values_to = "hits") %>% 
@@ -67,8 +69,15 @@ vp_l %>%
 ```
 
 ```{r}
+#| label: write and upload to osf
 vp_l %>% 
   write_csv("2_data/2_clean/pinpoint/vp_pp_2025_l.csv")
+
+rawdata %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("pinpoint") %>% 
+  osf_upload("2_data/2_clean/pinpoint/vp_pp_2025_l.csv")
 ```
 
 ```{r}
@@ -103,6 +112,11 @@ plot_stats %>%
 
 plot_stats %>%
   readr::write_csv('2_data/2_clean/plot_stats_veg_2025.csv')
+
+rawData %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_upload("2_data/2_clean/plot_stats_veg_2025.csv")
 ```
 
 ## trait data
@@ -190,6 +204,12 @@ traits <- traits %>%
 
 traits %>% 
 write_csv("2_data/2_clean/traits/traits_w.csv")
+
+rawData %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("traits") %>% 
+  osf_upload("2_data/2_clean/traits/traits_w.csv")
 ```
 
 ```{r}
@@ -200,6 +220,12 @@ traits_l <- traits %>%
 
 traits_l %>% 
 write_csv("2_data/2_clean/traits/traits_l.csv")
+
+rawData %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("traits") %>% 
+  osf_upload("2_data/2_clean/traits/traits_l.csv")
 ```
 
 ### Outlier checks
@@ -278,6 +304,12 @@ try_data_filtered %>%
   rename(species = SpeciesName, 
          ID = ObservationID) %>% 
   write.csv("2_data/2_clean/traits/try_traits.csv")
+
+rawData %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("traits") %>% 
+  osf_upload("2_data/2_clean/traits/try_traits.csv")
 ```
 
 # soil data
@@ -302,12 +334,13 @@ if (!file.exists("2_data/1_raw/soil/soil_chem.csv")) {
 ```
 
 ```{r}
-#| label: wrangle data
+#| label: wrangle data and upload to OSF
 soil_chem <- read_csv("2_data/1_raw/soil/soil_chem.csv") %>%
   mutate(
     treat = recode(
       treat,
-      "S" = "SF",
+      "S" = "snowfence",
+      "C" = "control"
     )
   ) %>%
   rename(site = "plot") %>%
@@ -328,10 +361,7 @@ soil_chem %>%
   head(10)
 
 write.csv(soil_chem, "2_data/2_clean/soil/soil_chem.csv")
-```
 
-```{r}
-#| label: upload to osf
 rawData %>%
   osf_ls_files() %>%
   filter(name == "clean") %>%
@@ -361,6 +391,27 @@ if (!file.exists("2_data/1_raw/clim/seasonal_soil_temperatures.csv")) {
 # upload to osf
 
 ```{r}
-#| label: wrangel data
+#| label: wrangel data and upload to OSF
+soil_temp <- read_csv("2_data/1_raw/clim/seasonal_soil_temperatures.csv") %>%
+  select(!...1) %>%
+  mutate(
+    vegetation = recode(
+      vegetation,
+      x = "ridge",
+      e = "heath",
+      d = "fen"
+    )
+  ) %>%
+  mutate(site = substr(plot, 2, 2), .before = "season_class") %>%
+  select(!plot)
 
+head(soil_temp, 10)
+
+write_csv(soil_temp, "2_data/2_clean/clim/soil_temp.csv")
+
+rawdata %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("clim") %>%
+  osf_upload("2_data/2_clean/clim/soil_temp.csv")
 ```

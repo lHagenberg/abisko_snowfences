@@ -21,25 +21,35 @@ knitr::opts_chunk$set(echo = TRUE)
 ## packages
 
 ```{r}
-# utilities
-library(broom)
-library(purrr)
-library(tidyverse)
-library(openxlsx)
+pkgs <- c(
+  # utilities:
+  "broom",
+  "purr",
+  "tidyverse",
+  "openxlsx",
+  # modelling:
+  "glmmTMB",
+  "brms",
+  "tidyverse",
+  "bayestestR",
+  "bayesplot",
+  "conflicted"
+)
 
-# modelling:
-library(glmmTMB)
-library(brms)
-library(tidybayes)
-library(bayestestR)
-library(bayesplot)
+#install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+lapply(pkgs, library, character.only = TRUE)
 
-library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
 
+```{r}
+#| label: connect to OSF
+rawData <- osf_retrieve_node("xw3hy")  
+```
+
 ## functions
+
 
 ```{r}
 extr_3 <- function(string) {
@@ -135,6 +145,12 @@ biomass_clean <- biomass_clean %>%
 
 biomass_clean %>% 
   write_csv("2_data/2_clean/biomass/sf_biomass.csv")
+
+rawdata %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("biomass") %>%
+  osf_upload("2_data/2_clean/biomass/sf_biomass.csv")
 ```
 
 ```{r}
@@ -517,6 +533,11 @@ no_bm <- community_biomass %>%
 ```{r}
 community_biomass %>% 
   write_csv("2_data/2_clean/sf_community.csv")
+
+rawdata %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_upload("2_data/2_clean/sf_community.csv")
 ```
 
 ```{r}
