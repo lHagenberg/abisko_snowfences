@@ -17,23 +17,23 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # setup
+
 ```{r}
+#| label: load packages
 library(tidyverse)
 library(rtry)
 library(osfr)
-``` 
+```
 
 ```{r}
 #| label: connect to OSF
 rawData <- osf_retrieve_node("xw3hy")  
-
-rawData %>% 
-  osf_ls_files() %>% 
-  filter(name == "raw") %>% 
-  osf_ls_files()
 ```
+
 # data cleaning
+
 ## pinpoint data
+
 ```{r read data}
 vp_l <- readxl::read_excel("2_data/1_raw/community/2025/SF_pinpoint_2025.xlsx", sheet = "VP") %>% 
   slice(1:(n() - 4)) %>% 
@@ -75,8 +75,7 @@ vp_l %>%
 plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   mutate(habitat = case_when(habitat == 'D' ~ 'fen',
                            habitat == 'E' ~ 'heath',
-                           habitat == "X" ~ 'ridge')) %>% 
-  rename(plot = code)
+                           habitat == "X" ~ 'ridge')) 
 
 spec_list <- read.csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
 
@@ -106,8 +105,8 @@ plot_stats %>%
   readr::write_csv('2_data/2_clean/plot_stats_veg_2025.csv')
 ```
 
-
 ## trait data
+
 ```{r}
 # taxonomic information
 spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %>% 
@@ -133,6 +132,7 @@ leaf_chem <- read_csv("2_data/1_raw/traits/sf_leaf_chem.csv") %>%
 ```
 
 ### trait data (full)
+
 ```{r LDMC caclulation}
 traits_no_chem <- traits_no_chem_raw %>% 
   mutate(LDMC = dweight / fweight) %>% 
@@ -163,7 +163,8 @@ traits_no_chem_l %>%
 write_csv("2_data/2_clean/traits/traits_no_chem_l.csv")
 ```
 
-### trait data (pooled) 
+### trait data (pooled)
+
 ```{r}
 traits <- traits_no_chem %>%  # pool data by plot and species
   group_by(plot, spec) %>% 
@@ -181,6 +182,7 @@ traits <- traits_no_chem %>% # add taxonomic variables to pooled dataset
 ```
 
 #### add leaf chem comp
+
 ```{r}
 traits <- traits %>% 
   left_join(leaf_chem, by = c("plot", "spec")) %>% # combined data has 3 extra rows??? 
@@ -201,6 +203,7 @@ write_csv("2_data/2_clean/traits/traits_l.csv")
 ```
 
 ### Outlier checks
+
 ```{r}
 traits_no_chem %>% 
   ggplot(aes(x = species, y = SLA)) + 
@@ -209,6 +212,7 @@ traits_no_chem %>%
 ```
 
 ## TRY traits
+
 ```{r}
 try_data <- rtry_import("2_data/1_raw/traits/try_data.txt")
 
@@ -277,10 +281,12 @@ try_data_filtered %>%
 ```
 
 # soil data
+
 ## soil chem comp
+
 ```{r}
 #| label: pull data from OSF
-if (!file.exists("2_data/1_raw/soil/carbon_comp.xlsx")) {
+if (!file.exists("2_data/1_raw/soil/soil_chem.csv")) {
   if (!dir.exists("2_data/1_raw/soil")) {
     dir.create("2_data/1_raw/soil", recursive = TRUE)
   }
@@ -293,15 +299,54 @@ if (!file.exists("2_data/1_raw/soil/carbon_comp.xlsx")) {
     osf_ls_files() %>%
     osf_download("2_data/1_raw/soil")
 }
-``` 
+```
+
+```{r}
+#| label: wrangle data
+soil_chem <- read_csv("2_data/1_raw/soil/soil_chem.csv") %>%
+  mutate(
+    treat = recode(
+      treat,
+      "S" = "SF",
+    )
+  ) %>%
+  rename(site = "plot") %>%
+  mutate(plot = paste0(veg, site, treat), .before = "veg") %>%
+  mutate(plot = str_to_upper(plot)) %>%
+  mutate(
+    veg = recode(
+      veg,
+      x = "ridge",
+      e = "heath",
+      d = "fen"
+    )
+  ) %>%
+  rename(habitat = "veg", treatment = "treat") %>%
+  select(!identifier)
+
+soil_chem %>%
+  head(10)
+
+write.csv(soil_chem, "2_data/2_clean/soil/soil_chem.csv")
+```
+
+```{r}
+#| label: upload to osf
+rawData %>%
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("soil") %>%
+  osf_upload("2_data/2_clean/soil/soil_chem.csv")
+```
 
 ## soil temp
+
 ```{r}
 #| label: pull data from osf
 if (!file.exists("2_data/1_raw/clim/seasonal_soil_temperatures.csv")) {
   if (!dir.exists("2_data/1_raw/clim")) {
     dir.create("2_data/1_raw/clim", recursive = TRUE)
-  }
+ }
 
   rawData %>%
     osf_ls_files() %>%
@@ -314,8 +359,8 @@ if (!file.exists("2_data/1_raw/clim/seasonal_soil_temperatures.csv")) {
 ```
 
 # upload to osf
-```{r}
 
+```{r}
+#| label: wrangel data
 
 ```
-
