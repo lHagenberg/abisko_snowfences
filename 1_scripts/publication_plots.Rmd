@@ -363,8 +363,7 @@ pa <- boot_traits_bm %>%
   geom_text(data = sig_positions, aes(y = y_pos, label = significance), 
                   position = position_dodge(width = 0)) +
   scale_fill_manual(values = c("#999999", "#4da6ff")) +
-  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))
-  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))) +
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
              labeller = as_labeller(trait_labs, label_parsed)) + 
   labs(x = "Habitat", y = "Community weighted mean") + 
@@ -456,7 +455,7 @@ gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_br
 stats <- bind_rows(gamma0_stats, gamma_stats) %>% 
   arrange(habitat, group)
 
-write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
+#write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
 ```
 ```{r}
 #| label: biomass brm violin plot
@@ -465,7 +464,7 @@ sig_vals[c(15, 17)] <- "*" # headth dS and eS are siggnificant
 est$sig_vals <- sig_vals
 rm(sig_vals)
 est <- est %>%
-  mutate(sig_pos = .upper * 1.3)
+  mutate(sig_pos = .upper * 1.25)
 
 
 leaf_bm_w <- leaf_bm %>%
@@ -505,6 +504,7 @@ ggplot() +
   scale_fill_manual(
     values = c("#999999", "#4da6ff")
   ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))) +
   facet_grid2(
     rows = vars(habitat),
     cols = vars(group),
@@ -514,6 +514,9 @@ ggplot() +
   theme_classic() +
   theme(
     legend.position = "bottom",
+    legend.margin = margin(t = -8),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
+
+ggsave("3_output/1_figures/publication_ready/esm_leaf_bm.png", height = 4.5, width = 7)
 ```
