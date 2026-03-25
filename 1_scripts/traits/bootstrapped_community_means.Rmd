@@ -18,31 +18,30 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
-script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
-setwd(file.path(script_dir, "..", ".."))
+#| label: load packages 
+pkgs <- c(
+  # data handling
+  "tidyverse",
+  "traitstrap",
+  # modelling
+  "lme4",
+  "nlme",
+  "glmmTMB",
+  "emmeans",
+  # diagnostics
+  "fitdistrplus",
+  "broom.mixed",
+  "DHARMa",
+  # plotting
+  "ggplot2",
+  "ggpubr",
+  "openxlsx",
+  "conflicted"
+)
 
-# data handling
-library(tidyverse)
+install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+purrr::walk(pkgs, library, character.only = TRUE); rm(pkgs)
 
-# analysis
-library(traitstrap)
-library(lme4); library(nlme); library(glmmTMB)
-library(emmeans)
-library(fitdistrplus)
-
-
-library(broom.mixed)
-
-# model diagnostics
-library(DHARMa)
-
-# visualization
-library(ggplot2)
-library(ggpubr)
-
-library(openxlsx)
-
-library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
@@ -536,7 +535,8 @@ writeData(wb, "hypothesis_test", hyp_test)
 addWorksheet(wb, "pair_comparison")
 writeData(wb, "pair_comparison", pair_comps)
 
-# Save the workbook
-saveWorkbook(wb, "3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", overwrite = TRUE)
-```
+# save the workbook
+saveworkbook(wb, "3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", overwrite = true)
 
+write_csv(hyp_test, "3_output/2_statistics/traits/esm_cwm_results.csv")
+```

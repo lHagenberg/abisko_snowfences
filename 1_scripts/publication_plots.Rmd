@@ -446,6 +446,19 @@ draws <- bind_rows(gamma0_draws, gamma_draws) %>%
 ```
 
 ```{r}
+gamma0_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "statistics") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F")  
+
+gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "statistics") %>% 
+  anti_join(gamma0_stats, by = c("habitat", "group"))
+
+stats <- bind_rows(gamma0_stats, gamma_stats) %>% 
+  arrange(habitat, group)
+
+write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
+```
+```{r}
 #| label: biomass brm violin plot
 sig_vals <- rep(c("ns", NA), 15)
 sig_vals[c(15, 17)] <- "*" # headth dS and eS are siggnificant
