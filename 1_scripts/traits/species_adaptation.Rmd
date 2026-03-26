@@ -18,37 +18,31 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
-library(openxlsx)
+pkgs <- c(
+  "openxlsx",
+  "tidyverse",
+  "broom",
+  "purrr",
+  "ggplot2",
+  "traitstrap",
+  "vegan",
+  "lme4",
+  "lmerTest",
+  "glmmTMB",
+  "pscl",
+  "brms",
+  "emmeans",
+  "MuMIn",
+  "DHARMa",
+  "easystats",
+  "fitdistrplus",
+  "conflicted"
+)
 
-# data handling
-library(tidyverse)
-library(broom)
-library(purrr)
+install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+purrr::walk(pkgs, library, character.only = TRUE)
+rm(pkgs)
 
-# visualization
-library(ggplot2)
-
-library(traitstrap)
-
-# modelling
-library(vegan)
-library(lme4)
-library(lmerTest)
-library(glmmTMB)
-library(pscl)
-library(brms)
-
-# model coefficients
-library(emmeans)
-library(MuMIn)
-
-# model diagnostics
-library(DHARMa)
-library(easystats)
-library(fitdistrplus)
-
-
-library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 ```
@@ -163,6 +157,7 @@ ITV_wide <- ITV %>%
   pivot_wider(names_from = treatment, 
               values_from = CWM) %>% 
   mutate(diff = snowfence- control)
+
 ggplot(ITV_wide, aes(x=habitat,y=diff, fill=var_type))+
   geom_boxplot()+
   facet_wrap(~trait, 
@@ -176,7 +171,7 @@ ITV_w <- ITV %>%
 ITV %>% 
   filter(var_type == "local") %>% 
   ggplot(aes(x = habitat, y = CWM, fill = treatment)) + 
-  geom_boxplot() +
+  geom_boxplot()
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2)
 ```
 
@@ -194,6 +189,7 @@ ITV_w %>%
 ```
 
 #### fixed = habitat
+
 ```{r}
 hbt <- c("fen", "heath", "ridge")
 fix_avg_hbt <- data.frame()
@@ -238,8 +234,7 @@ x <- community %>%
          wC = wC / biomass, 
          d13C = d13C / biomass, 
          CN_ratio = CN_ratio / biomass
-         ) %>% 
-  select(!biomass)
+         ) 
 
 if (nrow(fix_avg_hbt) == 0) {
      fix_avg_hbt <- x
@@ -251,7 +246,7 @@ if (nrow(fix_avg_hbt) == 0) {
 ```
 
 ```{r}
-ITV_hbt <- bind_rows(fix_avg, spec_avg) %>% 
+ITV_hbt <- bind_rows(fix_avg_hbt, spec_avg) %>% 
   select(!c(habitat, biomass)) %>% 
   pivot_longer(cols = height:CN_ratio, names_to = "trait", values_to = "trait_value") %>% 
   pivot_wider(names_from = var_type, 
@@ -276,14 +271,14 @@ ITV_hbt_w <- ITV_hbt %>%
 ITV_hbt %>% 
   filter(var_type == "local") %>% 
   ggplot(aes(x = habitat, y = CWM, fill = treatment)) + 
-  geom_boxplot() +
+  geom_boxplot()
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2)
 ```
 
 ```{r}
 ITV_hbt_w %>% 
   ggplot(aes(x = landscape, y = ITV, color = habitat)) + 
-  geom_point(aes(shape = treatment)) +
+  geom_point(aes(shape = treatment))
   facet_wrap( ~ trait, scales = "free", nrow = 2, ncol = 4) + 
   theme_classic() + 
   theme(panel.spacing = unit(.0, "lines"),
@@ -536,10 +531,10 @@ var_prop %>%
   select(!total) %>% 
   pivot_longer(cols = turnover:covariation, names_to = "var_type", values_to = "variance") %>% 
   filter(variance >= 0) %>%
-  ggplot(aes(x = trait, y = variance, fill = var_type)) +
+  ggplot(aes(x = trait, y = variance, fill = var_type))
   geom_col(position = "fill") + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme_classic() +
+  theme_classic()
   theme(legend.position = "bottom",
         legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm"))
 ```
@@ -723,7 +718,7 @@ var_prop %>%
   filter(term == "total") %>% 
   select(!total) %>% 
   pivot_longer(cols = turnover:covariation, names_to = "var_type", values_to = "variance") %>% 
-  ggplot(aes(x = trait, y = variance, fill = var_type)) +
+  ggplot(aes(x = trait, y = variance, fill = var_type))
   geom_col(position = "fill") + 
   facet_wrap(~ habitat, nrow = 3)
 ```
@@ -768,13 +763,13 @@ for(t in 1:length(tr)) {
   y <- spec_avg %>% # CWM local
     select(!var_type) %>% 
     column_to_rownames("plot") %>% 
-    select(t)
+    select(all_of(t))
   
   x1 <- fix_avg %>%  # CWM landscape
     select(!c(var_type, biomass)) %>% 
     column_to_rownames("plot") %>% 
     relocate(tr) %>% 
-    select(t)
+    select(all_of(t))
   
   x2 <- x1 - y # ITV
     
@@ -804,11 +799,11 @@ names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", 
 
 varpart_r2 %>% 
   filter(r2 >= 0) %>%
-  ggplot(aes(x = trait, y = r2, fill = var_part)) +
+  ggplot(aes(x = trait, y = r2, fill = var_part))
   geom_col(position = "fill") + 
   scale_x_discrete(labels = parse(text = trait_labs)) + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme_classic() +
+  theme_classic()
   theme(legend.position = "bottom",
         legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
   coord_flip()
@@ -847,10 +842,10 @@ for(h in 1:length(hbt)) {
    
   for(t in 1:length(tr)) {
     y <- y_hbt %>% 
-      select(t)
+      select(all_of(t))
     
     x1 <- x1_hbt %>% 
-      select(t)
+      select(all_of(t))
     
     x2 <- x1 - y # ITV
       
@@ -884,11 +879,11 @@ names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", 
 
 varpart_r2_hbt %>% 
   filter(r2 >= 0) %>%
-  ggplot(aes(x = trait, y = r2, fill = var_part)) +
+  ggplot(aes(x = trait, y = r2, fill = var_part))
   geom_col(position = "fill") + 
   scale_x_discrete(labels = parse(text = trait_labs)) + 
   scale_y_continuous(expand = c(0,0)) + 
-  theme_classic() +
+  theme_classic()
   theme(legend.position = "bottom",
         legend.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "cm")) + 
   facet_wrap(~habitat)
@@ -923,18 +918,18 @@ all_traits %>%
          trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
   mutate(trait = factor(trait, levels = facet_order), 
          treatment = factor(treatment, levels = c("global", "control", "snowfence"))) %>%
-  ggplot(aes(x = group, y = trait_value, fill = treatment)) +
-  #geom_violin(trim = FALSE, position = position_dodge(.8),) +
-  geom_boxplot(outliers = FALSE, position = position_dodge(.8), width = .6) +
+  ggplot(aes(x = group, y = trait_value, fill = treatment))
+  #geom_violin(trim = FALSE, position = position_dodge(.8),)
+  geom_boxplot(outliers = FALSE, position = position_dodge(.8), width = .6)
   geom_jitter(aes(color = treatment), alpha = 0.2,
-              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8)) +
-  scale_fill_manual(values = c("#ff6666", "#999999", "#4da6ff")) +
-  scale_color_manual(values = c("#ff6666", "#999999", "#4da6ff")) +
+              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8))
+  scale_fill_manual(values = c("#ff6666", "#999999", "#4da6ff"))
+  scale_color_manual(values = c("#ff6666", "#999999", "#4da6ff"))
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
-             labeller = as_labeller(trait_labs, label_parsed)) +
-  scale_x_discrete(labels=c("dS" = "d. shrubs", "eS" = "e. shrubs", "F" = "forbs", "G" = "graminoids")) +
-  labs(x = "Functional group", y = "Trait value", fill = "Dataset", color = "Dataset") +
-  theme_classic() +
+             labeller = as_labeller(trait_labs, label_parsed))
+  scale_x_discrete(labels=c("dS" = "d. shrubs", "eS" = "e. shrubs", "F" = "forbs", "G" = "graminoids"))
+  labs(x = "Functional group", y = "Trait value", fill = "Dataset", color = "Dataset")
+  theme_classic()
   theme(panel.spacing = unit(.0, "lines"),
         panel.border = element_rect(color = "black", fill = NA, size = 1),
         legend.position = "bottom",
@@ -1129,11 +1124,11 @@ saveWorkbook(wb, "3_output/2_statistics/traits/local_global_trait_comp_lm.xls", 
 How does individual species response differ between treatments? what is the direction of this response and what is it related to? 
 ```{r plant height plot, echo = FALSE}
 traits %>% 
-  ggplot(aes(x = habitat, y = height, color = treatment)) +
-  geom_boxplot() +
-  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75)) +
-  theme_classic() +
-  facet_grid(~ spec) +
+  ggplot(aes(x = habitat, y = height, color = treatment))
+  geom_boxplot()
+  geom_jitter(aes(), alpha = 0.3, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75))
+  theme_classic()
+  facet_grid(~ spec)
   theme(legend.position = c(.85, .8), 
         axis.text.x = element_text(angle = 25, hjust = 1))
 

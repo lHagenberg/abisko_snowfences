@@ -70,8 +70,7 @@ species_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv") %
 
 ```{r}
 # biomass model outputs
-biomass_models <- 
-  read_csv("3_output/2_statistics/biomass/biomass_models.csv") %>% 
+biomass_models <- read_csv("3_output/2_statistics/biomass/biomass_models.csv") %>% 
   filter(spec != "Rholap")
 ```
 
