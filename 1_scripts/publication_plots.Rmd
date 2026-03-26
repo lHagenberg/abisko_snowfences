@@ -409,6 +409,21 @@ ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c
 ## Fig sx. biomass brms
 
 ```{r}
+#| label: export brms results for ESM
+gamma0_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "statistics") %>% 
+  filter(habitat == "fen" & group == "eS" | 
+           habitat == "heath" & group == "F")  
+
+gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "statistics") %>% 
+  anti_join(gamma0_stats, by = c("habitat", "group"))
+
+stats <- bind_rows(gamma0_stats, gamma_stats) %>% 
+  arrange(habitat, group)
+
+#write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
+```
+
+```{r}
 #| label: plot data
 plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
   select(plot:treatment)
@@ -445,27 +460,18 @@ draws <- bind_rows(gamma0_draws, gamma_draws) %>%
 ```
 
 ```{r}
-gamma0_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "statistics") %>% 
-  filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F")  
-
-gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "statistics") %>% 
-  anti_join(gamma0_stats, by = c("habitat", "group"))
-
-stats <- bind_rows(gamma0_stats, gamma_stats) %>% 
-  arrange(habitat, group)
-
-#write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
-```
-```{r}
 #| label: biomass brm violin plot
+hbt_labs <- c("decid. shrubs", "evergr. shrubs", "forbs", "graminoids", "total")
+names(hbt_labs) <- c("dS", "eS", "F", "G", "total_bm")
+
 sig_vals <- rep(c("ns", NA), 15)
 sig_vals[c(15, 17)] <- "*" # headth dS and eS are siggnificant
 est$sig_vals <- sig_vals
 rm(sig_vals)
 est <- est %>%
-  mutate(sig_pos = .upper * 1.25)
-
+  group_by(habitat, group) %>%
+  mutate(sig_pos = max(.upper) * 1.25) %>%
+  ungroup()
 
 leaf_bm_w <- leaf_bm %>%
   pivot_wider(names_from = group, values_from = total_bm) %>%
@@ -491,11 +497,12 @@ ggplot() +
   geom_errorbar(
     data = est, # 95% CIs
     aes(ymin = .lower, ymax = .upper, x = treatment),
-    alpha = 0.4
+    alpha = 0.4,
+    width = 0.5
   ) +
   geom_text(
     data = est,
-    aes(x = treatment, y = sig_pos, label = sig_vals),
+    aes(x = 1.5, y = sig_pos, label = sig_vals),
     position = position_dodge(width = 0)
   ) +
   scale_color_manual(
@@ -504,19 +511,37 @@ ggplot() +
   scale_fill_manual(
     values = c("#999999", "#4da6ff")
   ) +
-  scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0.1, 0.2)),
+    labels = function(x) {
+      v <- x / 4
+      ifelse(v == round(v), 
+      formatC(v, format = "f", digits = 0),
+            formatC(v, format = "f", digits = 2))
+    }
+  ) +
+    scale_x_discrete(
+      labels = c("control" = "CTL", "snowfence" = "SF")
+    ) +
   facet_grid2(
     rows = vars(habitat),
     cols = vars(group),
     scales = "free_y",
-    independent = "y"
+    independent = "y",
+    labeller = labeller(group = hbt_labs)
   ) +
-  theme_classic() +
+  labs(x = "Treatment", y = expression(Biomass~(g~m^{-2}))) +
+theme_classic() +
   theme(
+    legend.title = element_blank(),
     legend.position = "bottom",
     legend.margin = margin(t = -8),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
 
-ggsave("3_output/1_figures/publication_ready/esm_leaf_bm.png", height = 4.5, width = 7)
+ggsave(
+  "3_output/1_figures/publication_ready/esm_leaf_bm.tif",
+  height = 5,
+  width = 8
+)
 ```

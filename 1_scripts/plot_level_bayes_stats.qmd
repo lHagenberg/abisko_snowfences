@@ -402,7 +402,7 @@ draws <- bind_rows(gamma0_draws, gamma_draws) %>%
 ```
 
 ```{r}
-#| label: biomass brm violin plot
+#| label: biomass brm violin plot (test)
 leaf_bm_w <- leaf_bm %>% 
   pivot_wider(names_from = group, values_from = total_bm) %>% 
   mutate(total_bm = rowSums(across(where(is.numeric)))) %>% 
