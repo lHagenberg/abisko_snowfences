@@ -23,7 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 pkgs <- c("tidyverse", "rtry", "osfr")
 
 #install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
-lapply(pkgs, library, character.only = TRUE)
+purrr::walk(pkgs, library, character.only = TRUE)
 ```
 
 ```{r}
@@ -388,10 +388,8 @@ if (!file.exists("2_data/1_raw/clim/seasonal_soil_temperatures.csv")) {
 }
 ```
 
-# upload to osf
-
 ```{r}
-#| label: wrangel data and upload to OSF
+#| label: wrangel data and upload to osf
 soil_temp <- read_csv("2_data/1_raw/clim/seasonal_soil_temperatures.csv") %>%
   select(!...1) %>%
   mutate(
@@ -414,4 +412,52 @@ rawdata %>%
   filter(name == "clean") %>%
   osf_mkdir("clim") %>%
   osf_upload("2_data/2_clean/clim/soil_temp.csv")
+```
+
+# macroclimate
+```{r}
+#| label: import data
+clim_2019 <- read_csv("2_data/1_raw/clim/MJA_clim_2019.csv")
+clim_2020 <- read_csv("2_data/1_raw/clim/MJA_clim_2020.csv")
+clim_2021 <- read_csv("2_data/1_raw/clim/MJA_clim_2021.csv")
+clim_2022 <- read_csv("2_data/1_raw/clim/MJA_clim_2022.csv")
+clim_2023 <- read_csv("2_data/1_raw/clim/MJA_clim_2023.csv")
+clim_2024 <- read_csv("2_data/1_raw/clim/MJA_clim_2024.csv")
+clim_2025 <- read_csv("2_data/1_raw/clim/MJA_clim_2025.csv")
+
+clim <- bind_rows(clim_2019, clim_2020, clim_2021, clim_2022, clim_2023, clim_2024, clim_2025); rm(clim_2019, clim_2020, clim_2021, clim_2022, clim_2023, clim_2024, clim_2025)
+
+
+write_csv(clim, "2_data/2_clean/clim/MJA_clim.csv")
+
+```
+
+```{r}
+rawData %>% # macroclimatic data
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("clim") %>% 
+  osf_upload("2_data/2_clean/clim/MJA_clim.csv")
+
+rawData %>% # metadata
+  osf_ls_files() %>%
+  filter(name == "clean") %>%
+  osf_mkdir("clim") %>% 
+  osf_upload("2_data/1_raw/clim/MJA_clim_metadata.csv")
+
+```
+```{r}
+
+clim %>% 
+  mutate(
+    year = as.numeric(format(TIMESTAMP, "%Y")),
+    month = as.numeric(format(TIMESTAMP, "%m")),
+    .before = TIMESTAMP
+  ) %>% 
+  #group_by(year) %>% 
+  summarise(
+    tYear = mean(TA, na.rm  = TRUE),
+    pYear = sum(PRECIP, na.rm = TRUE)/7,
+  )
+
 ```
