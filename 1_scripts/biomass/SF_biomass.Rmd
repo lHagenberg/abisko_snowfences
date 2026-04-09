@@ -23,6 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 pkgs <- c(
   # utilities:
+  "osfr",
   "broom",
   "purrr",
   "tidyverse",
@@ -139,7 +140,7 @@ biomass_clean <- biomass_clean %>%
 biomass_clean %>% 
   write_csv("2_data/2_clean/biomass/sf_biomass.csv")
 
-rawdata %>%
+rawData %>%
   osf_ls_files() %>%
   filter(name == "clean") %>%
   osf_mkdir("biomass") %>%
@@ -181,169 +182,6 @@ biomass_pinpoint %>%
   head(10)
 ```
 
-# biomass modelling
-
-## leaf biomass
-
-```{r}
-leaf_bm <- community %>% 
-  filter(part == "leaf") %>%
-  na.omit() %>% 
-  group_by(plot, group) %>% 
-  summarise(total_bm = sum(biomass)) %>% 
-  left_join(plot_data) %>% 
-  relocate(habitat:treatment, .after = plot) %>% 
-  filter(total_bm > 0) # remove 0
-```
-
-### model test
-
-```{r}
-y <- leaf_bm %>% 
-  filter(habitat == "fen", 
-         group == "eS") #%>% 
-  # group_by(plot) %>% 
-  # summarise(total_bm = sum(total_bm), 
-  #           habitat = first(habitat),      # Take first value (all same)
-  #   treatment = first(treatment),
-  #   site = first(site))
-
-dist <- fitdist(y$total_bm, "gamma")
-plot(dist)
-
-```
-
-```{r}
-fit <- glmmTMB(total_bm ~ treatment, data = y, family = Gamma); AICc(fit) # too few unique datapoints
-
-summary(fit)
-car::Anova(fit, type = "II") %>% 
-  tidy()
-
-# diagnostics
-simulationOutput <- simulateResiduals(fittedModel = fit)
-plot(simulationOutput)
-testDispersion(simulationOutput); rm(simulationOutput)
-
-x <- check_collinearity(fit)
-plot(x); rm(x)
-```
-
-#### brms
-
-```{r}
-ggplot(y, aes(x = treatment, y = total_bm, group = site)) +
-  geom_point(size = 3) +
-  geom_line(aes(color = site)) +  # Lines connect pairs
-  scale_y_log10() +
-  labs(title = "Paired design: each line is one site",
-       subtitle = "Treatment effect within sites")
-```
-
-```{r}
-model_subset <- brm(
-  total_bm ~ treatment + (1|site),  # Site captures pairing
-  data = y,
-  family = Gamma(link = "log"),
-  # prior = c(
-  #   prior(normal(0, 2), class = "Intercept"),
-  #   prior(normal(0, 1), class = "b"),           # Treatment effect
-  #   prior(exponential(1), class = "sd"),         # Between-site variation
-  #   prior(gamma(2, 0.1), class = "shape")
-  # ),
-  chains = 4,
-  iter = 6000,      # More iterations for small n
-  warmup = 3000,
-  cores = 4,
-  seed = 123,
-  control = list(adapt_delta = 0.99)  # Higher for small sample
-)
-
-
-# check priors
-log(mean(y$total_bm))
-
-prior_pred <- brm(
-  total_bm ~ treatment + (1|site),
-  data = y,
-  family = Gamma(link = "log"),
-  prior = c(
-    prior(normal(4.976094, 1), class = "Intercept"),
-    prior(normal(0, 1), class = "b"),
-    prior(exponential(1), class = "sd"),
-    prior(gamma(2, 0.1), class = "shape")
-  ),
-  sample_prior = "only",
-  chains = 2, iter = 2000
-)
-
-pp_check(prior_pred, ndraws = 100) +
-  geom_vline(xintercept = range(y$total_bm), 
-             color = "red", linewidth = 1) +
-  labs(title = "Prior predictive check",
-       subtitle = "Simulated data (black) should cover observed range (red)") +
-  xlim(range(y$total_bm))
-
-# Extract prior predictions
-prior_samples <- posterior_predict(prior_pred, ndraws = 1000)
-
-# Check range
-range(y$total_bm)           # Observed range
-quantile(prior_samples, c(0.025, 0.975)) # priors are conservative (wider range than observed)
-
-# fit and diagnosis 
-summary(model_subset)
-all(rhat(model_subset) < 1.01)
-neff_ratio(model_subset)
-
-pp_check(model_subset, ndraws = 100)
-pp_check(model_subset, type = "stat", stat = "mean")
-
-loo_subset <- loo(model_subset); print(loo_subset)
-plot(loo_subset)
-
-# get posterior stats
-results <- describe_posterior(
-  model_subset,
-  ci = 0.95,
-  test = c("pd", "rope", "bf")
-); print(results)
-
-treatment_effect <- model_subset %>%
-  spread_draws(b_treatmentsnowfence) %>%  # Adjust name if needed
-  median_hdi(.width = c(0.50, 0.80, 0.95)); print(treatment_effect)
-
-pd_result <- pd(model_subset); print(pd_result)
-
-model_subset %>%
-  spread_draws(b_treatmentsnowfence) %>%
-  mutate(effect_ratio = exp(b_treatmentsnowfence)) %>%  # Back-transform
-  median_hdi(effect_ratio, .width = 0.95)
-```
-
-```{r}
-# plotting leaf biomass vs pinpoint
-leaf_biomass_pinpoint %>% 
-  filter(spec == "Andpol") %>% 
-  ggplot(aes(x = hits_noNA, y = dweight)) + 
-  geom_point()
-
-species <- unique(leaf_biomass_pinpoint$spec)
-plot_list <- list()
-
-for(sp in species) {
-  plot_list[[sp]] <- leaf_biomass_pinpoint %>%
-    filter(spec == sp) %>%
-    ggplot(aes(x = hits_noNA, y = dweight)) + 
-    geom_point() +
-    geom_smooth(method = "lm", se = TRUE) +
-    ggtitle(sp)
-}
-
-patchwork::wrap_plots(plot_list, ncol = 5) 
-
-ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height =  30)
-```
 
 ### data prep
 ```{r}
@@ -527,7 +365,7 @@ no_bm <- community_biomass %>%
 community_biomass %>% 
   write_csv("2_data/2_clean/sf_community.csv")
 
-rawdata %>%
+rawData %>%
   osf_ls_files() %>%
   filter(name == "clean") %>%
   osf_upload("2_data/2_clean/sf_community.csv")
@@ -697,6 +535,173 @@ community %>%
   guides(fill = guide_legend(reverse = TRUE))
 ```
 
+# biomass modelling
+
+## leaf biomass
+NOTE: depricated, see plot_level_bayes_stats
+```{r}
+community <- read_csv("2_data/2_clean/sf_community.csv")
+```
+
+```{r}
+leaf_bm <- community %>% 
+  filter(part == "leaf") %>%
+  na.omit() %>% 
+  group_by(plot, group) %>% 
+  summarise(total_bm = sum(biomass)) %>% 
+  left_join(plot_data) %>% 
+  relocate(habitat:treatment, .after = plot) %>% 
+  filter(total_bm > 0) # remove 0
+```
+
+### model test
+
+```{r}
+y <- leaf_bm %>% 
+  filter(habitat == "fen", 
+         group == "eS") #%>% 
+  # group_by(plot) %>% 
+  # summarise(total_bm = sum(total_bm), 
+  #           habitat = first(habitat),      # Take first value (all same)
+  #   treatment = first(treatment),
+  #   site = first(site))
+
+dist <- fitdist(y$total_bm, "gamma")
+plot(dist)
+
+```
+
+```{r}
+fit <- glmmTMB(total_bm ~ treatment, data = y, family = Gamma); AICc(fit) # too few unique datapoints
+
+summary(fit)
+car::Anova(fit, type = "II") %>% 
+  tidy()
+
+# diagnostics
+simulationOutput <- simulateResiduals(fittedModel = fit)
+plot(simulationOutput)
+testDispersion(simulationOutput); rm(simulationOutput)
+
+x <- check_collinearity(fit)
+plot(x); rm(x)
+```
+
+#### brms
+
+```{r}
+ggplot(y, aes(x = treatment, y = total_bm, group = site)) +
+  geom_point(size = 3) +
+  geom_line(aes(color = site)) +  # Lines connect pairs
+  scale_y_log10() +
+  labs(title = "Paired design: each line is one site",
+       subtitle = "Treatment effect within sites")
+```
+
+```{r}
+model_subset <- brm(
+  total_bm ~ treatment + (1|site),  # Site captures pairing
+  data = y,
+  family = Gamma(link = "log"),
+  # prior = c(
+  #   prior(normal(0, 2), class = "Intercept"),
+  #   prior(normal(0, 1), class = "b"),           # Treatment effect
+  #   prior(exponential(1), class = "sd"),         # Between-site variation
+  #   prior(gamma(2, 0.1), class = "shape")
+  # ),
+  chains = 4,
+  iter = 6000,      # More iterations for small n
+  warmup = 3000,
+  cores = 4,
+  seed = 123,
+  control = list(adapt_delta = 0.99)  # Higher for small sample
+)
+
+
+# check priors
+log(mean(y$total_bm))
+
+prior_pred <- brm(
+  total_bm ~ treatment + (1|site),
+  data = y,
+  family = Gamma(link = "log"),
+  prior = c(
+    prior(normal(4.976094, 1), class = "Intercept"),
+    prior(normal(0, 1), class = "b"),
+    prior(exponential(1), class = "sd"),
+    prior(gamma(2, 0.1), class = "shape")
+  ),
+  sample_prior = "only",
+  chains = 2, iter = 2000
+)
+
+pp_check(prior_pred, ndraws = 100) +
+  geom_vline(xintercept = range(y$total_bm), 
+             color = "red", linewidth = 1) +
+  labs(title = "Prior predictive check",
+       subtitle = "Simulated data (black) should cover observed range (red)") +
+  xlim(range(y$total_bm))
+
+# Extract prior predictions
+prior_samples <- posterior_predict(prior_pred, ndraws = 1000)
+
+# Check range
+range(y$total_bm)           # Observed range
+quantile(prior_samples, c(0.025, 0.975)) # priors are conservative (wider range than observed)
+
+# fit and diagnosis 
+summary(model_subset)
+all(rhat(model_subset) < 1.01)
+neff_ratio(model_subset)
+
+pp_check(model_subset, ndraws = 100)
+pp_check(model_subset, type = "stat", stat = "mean")
+
+loo_subset <- loo(model_subset); print(loo_subset)
+plot(loo_subset)
+
+# get posterior stats
+results <- describe_posterior(
+  model_subset,
+  ci = 0.95,
+  test = c("pd", "rope", "bf")
+); print(results)
+
+treatment_effect <- model_subset %>%
+  spread_draws(b_treatmentsnowfence) %>%  # Adjust name if needed
+  median_hdi(.width = c(0.50, 0.80, 0.95)); print(treatment_effect)
+
+pd_result <- pd(model_subset); print(pd_result)
+
+model_subset %>%
+  spread_draws(b_treatmentsnowfence) %>%
+  mutate(effect_ratio = exp(b_treatmentsnowfence)) %>%  # Back-transform
+  median_hdi(effect_ratio, .width = 0.95)
+```
+
+```{r}
+# plotting leaf biomass vs pinpoint
+leaf_biomass_pinpoint %>% 
+  filter(spec == "Andpol") %>% 
+  ggplot(aes(x = hits_noNA, y = dweight)) + 
+  geom_point()
+
+species <- unique(leaf_biomass_pinpoint$spec)
+plot_list <- list()
+
+for(sp in species) {
+  plot_list[[sp]] <- leaf_biomass_pinpoint %>%
+    filter(spec == sp) %>%
+    ggplot(aes(x = hits_noNA, y = dweight)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    ggtitle(sp)
+}
+
+patchwork::wrap_plots(plot_list, ncol = 5) 
+
+ggsave("3_output/1_figures/biomass/species_leaf_biomass.tif", width = 30, height =  30)
+```
 \# PCA of biomass and traits
 
 ```{r}

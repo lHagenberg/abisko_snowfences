@@ -55,6 +55,7 @@ leaf_bm <- community %>%
   filter(part == "leaf") %>%
   na.omit() %>% 
   group_by(plot, group) %>% 
+  mutate(biomass = biomass / 4 ) %>% # convert to g/m2
   summarise(total_bm = sum(biomass)) %>% 
   ungroup() %>% 
   left_join(plot_data) %>% 
