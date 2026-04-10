@@ -3,7 +3,7 @@ title: "publication_plots"
 author: "Liyenne"
 date: "2025-12-04"
 output: html_document
-knit: (function(input, ...) {
+  nit: (function(input, ...) {
     rmarkdown::render(
       input,
       output_dir = here::here("outputs")
@@ -33,7 +33,8 @@ pkgs <- c(
 )
 
 install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
-purrr::walk(pkgs, library, character.only = TRUE); rm(pkgs)
+purrr::walk(pkgs, library, character.only = TRUE)
+rm(pkgs)
 
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
@@ -43,63 +44,65 @@ conflict_prefer("filter", "dplyr")
 ## Fig 2. community composition
 ```{r}
 #| label: data import
-community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
-  mutate(site_id = str_sub(plot, 1, 2)) %>% 
+community <- read.csv("2_data/2_clean/sf_community.csv") |>
+  mutate(site_id = str_sub(plot, 1, 2)) |>
   select(plot:site, site_id, everything())
 
-total_hits <- community %>% 
-  filter(part != "other") %>% 
-  group_by(plot, spec) %>% 
-  summarise(total_hits = sum(hits)) %>% 
-  pivot_wider(names_from = spec, values_from = total_hits) %>% 
-  column_to_rownames("plot") %>% 
+total_hits <- community |>
+  filter(part != "other") |>
+  group_by(plot, spec) |>
+  summarise(total_hits = sum(hits)) |>
+  pivot_wider(names_from = spec, values_from = total_hits) |>
+  column_to_rownames("plot") |>
   select_if(negate(function(col) is.numeric(col) && sum(col) < 1)) #??? what is this
 
-leaf_bm <- community %>%
-  filter(part == "leaf") %>% 
-  na.omit() %>% 
-  select(plot, spec, biomass) %>% 
-  pivot_wider(names_from = spec, values_from = biomass) %>% 
-  select(!Rholap) %>% 
+leaf_bm <- community |>
+  filter(part == "leaf") |>
+  na.omit() |>
+  select(plot, spec, biomass) |>
+  pivot_wider(names_from = spec, values_from = biomass) |>
+  select(!Rholap) |>
   column_to_rownames("plot")
 
-meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
-  mutate(site_id = str_sub(plot, 1, 2)) %>% 
-  rename(plot_id = "plot") %>% 
+meta_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") |>
+  mutate(site_id = str_sub(plot, 1, 2)) |>
+  rename(plot_id = "plot") |>
   select(plot_id, site_id, habitat, treatment)
+
+spec_list <- read_csv("2_data/1_raw/community/2025/sf_vp_species_list.csv")
 ```
 
 ```{r NMDS, include = FALSE}
 #| label: calculate distance matrices
-bm_dist <- leaf_bm %>% 
+bm_dist <- leaf_bm |>
   vegdist(method = "bray", na.rm = TRUE)
 
-bm_nmds <- bm_dist %>% 
-  metaMDS(distance = "bray") %>% 
-  scores(tidy = TRUE) %>% 
-  filter(score == "sites") %>% 
+bm_nmds <- bm_dist |>
+  metaMDS(distance = "bray") |>
+  scores(tidy = TRUE) |>
+  filter(score == "sites") |>
   select(NMDS1, NMDS2)
-  
-spec_nmds <- leaf_bm %>%  
-  metaMDS(distance = "bray") %>% 
-  scores(tidy = TRUE) %>% 
-  filter(score == "species") 
 
-meta_nmds <- bm_nmds %>% 
-  rownames_to_column("plot_id") %>% 
-  right_join(meta_data, bm_nmds, by = "plot_id") %>% 
-  select(plot_id, site_id, habitat:treatment, NMDS1, NMDS2) %>% 
+spec_nmds <- leaf_bm |>
+  metaMDS(distance = "bray") |>
+  scores(tidy = TRUE) |>
+  filter(score == "species")
+
+meta_nmds <- bm_nmds |>
+  rownames_to_column("plot_id") |>
+  right_join(meta_data, bm_nmds, by = "plot_id") |>
+  select(plot_id, site_id, habitat:treatment, NMDS1, NMDS2) |>
   na.omit()
 ```
 
 ```{r NMDS plot (country), echo = FALSE}
 #| label: fig 2a. leaf bm NMDS
-hull_data <- meta_nmds %>% # find convex hulls
-  group_by(habitat, treatment) %>% # for each combination of country and habitat
-  arrange(NMDS1, NMDS2) %>%
+hull_data <- meta_nmds |> # find convex hulls
+  group_by(habitat, treatment) |> # for each combination of country and habitat
+  arrange(NMDS1, NMDS2) |>
   slice(chull(NMDS1, NMDS2))
 
-pa <- ggplot() +
+bm_nmds <- ggplot() +
   geom_point(
     data = meta_nmds,
     aes(x = NMDS1, y = NMDS2, colour = habitat, shape = treatment),
@@ -111,7 +114,6 @@ pa <- ggplot() +
     aes(
       x = NMDS1,
       y = NMDS2,
-      color = habitat,
       fill = habitat,
       linetype = treatment
     ),
@@ -126,7 +128,7 @@ pa <- ggplot() +
     alpha = 0.5
   ) + # add the species labels
   #geom_line(data = meta_nmds, aes(x = NMDS1, y = NMDS2, group = site_id), alpha = 0.3) +
-  annotate("text", x = -1, y = 1.2, label = "stress = 0.091") +
+  annotate("text", x = -1, y = 1.4, label = "stress = 0.091") +
   #xlim(min(spec_nmds$NMDS1) * 1.1, max(spec_nmds$NMDS1) * 1.1) +
   theme_classic() +
   theme(
@@ -137,42 +139,277 @@ pa <- ggplot() +
     legend.box.just = "left",
     legend.margin = margin(t = -8)
   )
-pa
+bm_nmds
 ```
 
 ```{r}
 #| label: fig 2b. leaf bm totals
-lbm <- community %>% 
-  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F")))) %>% 
-  filter(!is.na(group), 
-         part == "leaf") %>% 
+lbm <- community |>
+  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F")))) |>
+  filter(!is.na(group),
+         part == "leaf",
+         spec != "Rholap") |>
+  #group_by(treatment, habitat, group) |>
+  #summarise(biomass = mean(biomass, na.rm = TRUE)) |>
   mutate(
     biomass = biomass / 4 # convert to g/m2
-  ) %>% 
-    group_by(treatment, habitat, group) %>% 
-    summarise(biomass = mean(biomass, na.rm = TRUE))
+  ) |>
+    group_by(site, treatment, habitat, group) |>
+  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") |>
+    group_by(treatment, habitat, group) |>
+    summarise(
+      raw_mean = mean(bm_sum, na.rm = TRUE),
+      raw_sd   = sd(bm_sum, na.rm = TRUE),
+      .groups = "drop"
+    ) 
 
-pb <- ggplot() +
-  #geom_col(data = tbm, aes(x = treatment, y = biomass, fill = , alpha = .5), show.legend = FALSE) + 
-  geom_col(data = lbm, aes(x = treatment, y = biomass, fill = group)) + 
-  facet_wrap(~ habitat) + 
+bm_bars <- ggplot() +
+  #geom_col(data = tbm, aes(x = treatment, y = biomass, fill = , alpha = .5), show.legend = FALSE) +
+  geom_col(data = lbm, aes(x = treatment, y = raw_mean, fill = group)) +
+  facet_wrap(~ habitat) +
   scale_fill_manual(values = rev(c("#667c13", "#41532d", "#a3a351", "#6a9174")),
                     labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
-  scale_y_continuous(expand = expansion(mult = c(0, .1))) + 
-  labs(y = expression(Leaf~biomass~(g~m^{-2})), x = "Treatment") + 
+  scale_y_continuous(expand = expansion(mult = c(0, .1))) +
+  labs(y = expression(Leaf~biomass~(g~m^{-2})), x = "Treatment") +
   theme_classic() +
   theme(legend.position = "bottom",
-        legend.margin = margin(t = -8), 
+        legend.margin = margin(t = -8),
         legend.title = element_blank(),
-        axis.text.x = element_text(angle = 25, hjust = 1), 
-        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
-  guides(fill = guide_legend(reverse = TRUE, nrow = 2)); pb
+        axis.text.x = element_text(angle = 25, hjust = 1),
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 2)); bm_bars
 ```
 
+```{r}
+#| label: fig S2b. leaf bm totals
+# biomass pooled per plot
+
+tbm <- community |>
+  mutate(group = factor(group, levels = c("eS", "dS", "F", "G"))) |>
+  filter(!is.na(group)) |>
+  mutate(
+    biomass = biomass / 4 # convert to g/m2
+  ) |>
+  group_by(site, treatment, habitat) |>
+  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") |>
+  group_by(treatment, habitat) |>
+  summarise(
+    raw_mean = mean(bm_sum, na.rm = TRUE),
+    raw_sd = sd(bm_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(hbt_tr = paste(habitat, treatment, sep = "-"))
+
+lbm <- community |>
+  mutate(group = factor(group, levels = c("eS", "dS", "F", "G"))) |>
+  filter(!is.na(group), part == "leaf", spec != "Rholap") |>
+  mutate(
+    biomass = biomass / 4 # convert to g/m2
+  ) |>
+  group_by(site, treatment, habitat) |>
+  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") |>
+  group_by(treatment, habitat) |>
+  summarise(
+    raw_mean = mean(bm_sum, na.rm = TRUE),
+    raw_sd = sd(bm_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(hbt_tr = paste(habitat, treatment, sep = "-"))
+
+pa <- ggplot() +
+  geom_col(
+    data = tbm,
+    aes(x = habitat, y = raw_mean, fill = treatment, alpha = .5),
+    position = position_dodge(),
+    show.legend = FALSE
+  ) +
+  geom_col(
+    data = lbm,
+    aes(x = habitat, y = raw_mean, fill = treatment),
+    position = position_dodge(),
+  ) +
+  geom_errorbar(
+    data = tbm,
+    aes(
+      x = habitat,
+      ymin = raw_mean - raw_sd,
+      ymax = raw_mean + raw_sd,
+      group = treatment
+    ),
+    position = position_dodge(width = 0.9),
+    alpha = 0.5,
+    width = .2
+  ) +
+  geom_errorbar(
+    data = lbm,
+    aes(
+      x = habitat,
+      ymin = raw_mean - raw_sd,
+      ymax = raw_mean + raw_sd,
+      group = treatment
+    ),
+    position = position_dodge(width = 1.1),
+    alpha = 0.5,
+    width = .2
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, .1))) +
+  scale_fill_manual(
+    values = c("#999999", "#4da6ff")
+  ) +
+  labs(
+    y = expression(
+      Biomass ~ (g ~ m^{
+        -2
+      })
+    ),
+    x = "Habitat"
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "bottom",
+    legend.margin = margin(t = -8),
+    legend.box = "vertical",
+    legend.box.just = "left",
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+pa
+
+legend <- ggpubr::get_legend(pa)
+
+pa <- pa + theme(legend.position = "none")
+
+# biomass pooled per group per plot
+lbm <- community |>
+  mutate(group = factor(group, levels = c("eS", "dS", "F", "G"))) |>
+  filter(!is.na(group), part == "leaf", spec != "Rholap") |>
+  mutate(
+    biomass = biomass / 4 # convert to g/m2
+  ) |>
+  group_by(site, treatment, habitat, group) |>
+  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") |>
+  group_by(treatment, habitat, group) |>
+  summarise(
+    raw_mean = mean(bm_sum, na.rm = TRUE),
+    raw_sd = sd(bm_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(gr_tr = paste(habitat, treatment, sep = "-"))
+
+lsbm <- community |>
+  mutate(group = factor(group, levels = c("eS", "dS", "F", "G"))) |>
+  filter(!is.na(group)) |>
+  mutate(
+    biomass = biomass / 4 # convert to g/m2
+  ) |>
+  group_by(site, treatment, habitat, group) |>
+  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") |>
+  group_by(treatment, habitat, group) |>
+  summarise(
+    raw_mean = mean(bm_sum, na.rm = TRUE),
+    raw_sd = sd(bm_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(gr_tr = paste(habitat, treatment, sep = "-"))
+
+
+pb <- ggplot() +
+  geom_col(
+    data = lsbm,
+    aes(x = group, y = raw_mean, fill = treatment, alpha = .5),
+    position = "dodge",
+    show.legend = FALSE
+  ) +
+  geom_col(
+    data = lbm,
+    aes(x = group, y = raw_mean, fill = treatment),
+    position = "dodge"
+  ) +
+  geom_errorbar(
+    data = lsbm,
+    aes(
+      x = group,
+      ymin = raw_mean - raw_sd,
+      ymax = raw_mean + raw_sd,
+      group = gr_tr
+    ),
+    position = position_dodge(width = 0.9),
+    alpha = 0.5,
+    width = .2
+  ) +
+  geom_errorbar(
+    data = lbm[lbm$group %in% c("eS", "dS"), ],
+    aes(
+      x = group,
+      ymin = raw_mean - raw_sd,
+      ymax = raw_mean + raw_sd,
+      group = gr_tr
+    ),
+    position = position_dodge(width = 1.1),
+    alpha = 0.5,
+    width = .2
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, .1))) +
+  facet_wrap(~habitat, nrow = 3, strip.position = "right", scales = "free_y") +
+  scale_fill_manual(
+    values = c("#999999", "#4da6ff")
+  ) +
+  labs(
+    y = expression(
+      Biomass ~ (g ~ m^{
+        -2
+      })
+    ),
+    x = "Growth form"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "bottom",
+    legend.margin = margin(t = -8),
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.title = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  ) +
+  theme(legend.position = "none")
+pb
+
+bm_bars_alt <- ggarrange(
+  pb,
+  pa,
+  labels = c("a", "b"),
+  widths = c(3, 2.25),
+  legend.grob = legend,
+  legend = "bottom"
+)
+bm_bars_alt
+```
 ```{r NMDS plot (country), echo = FALSE}
 #| label: export figure
-ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), widths = c(4, 3))
-ggsave("3_output/1_figures/publication_ready/community_composition.tif", height = 4.5, width = 7)
+# original plot
+
+ggarrange(bm_nmds, bm_bars, ncol = 2, labels = c("a", "b"), widths = c(4, 3))
+
+ggsave(
+  "3_output/1_figures/publication_ready/community_composition.tif",
+  height = 4.5,
+  width = 7
+)
+
+# alternative plot
+ggarrange(
+  bm_nmds,
+  bm_bars_alt,
+  ncol = 2,
+  labels = c("a", "b"),
+  widths = c(4, 3)
+)
+
+ggsave(
+  "3_output/1_figures/publication_ready/community_composition1.tif",
+  height = 4.5,
+  width = 7
+)
 ```
 
 ## Fig 3. multivariate traits
@@ -180,33 +417,33 @@ ggsave("3_output/1_figures/publication_ready/community_composition.tif", height 
 #| label: import bootstrapped traits
 boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
 
-plot_traits <- boot_traits_bm %>% 
-  group_by(plot, trait) %>% 
-  summarise(boot_mean = mean (mean)) %>% 
-  pivot_wider(id_cols = plot, names_from = trait, values_from = boot_mean) %>% 
-  column_to_rownames(var = "plot") %>% 
-  select(-c(dweight, fweight, leafa)) 
+plot_traits <- boot_traits_bm |>
+  group_by(plot, trait) |>
+  summarise(boot_mean = mean (mean)) |>
+  pivot_wider(id_cols = plot, names_from = trait, values_from = boot_mean) |>
+  column_to_rownames(var = "plot") |>
+  select(-c(dweight, fweight, leafa))
 
 # PCA
-plot_pca <- plot_traits %>% 
-  scale() %>% 
+plot_pca <- plot_traits |>
+  scale() |>
   rda()
 
 summary(plot_pca)
 
 site_scores <- as.data.frame(plot_pca$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
-trait_scores_a <- as.data.frame(plot_pca$CA$v[, 1:2]) %>% 
-  mutate(PC1 = PC1 * -1, 
+trait_scores_a <- as.data.frame(plot_pca$CA$v[, 1:2]) |>
+  mutate(PC1 = PC1 * -1,
          PC2 = PC2 * -1)
-trait_scores_a$trait <- as.factor(rownames(trait_scores_a)) 
+trait_scores_a$trait <- as.factor(rownames(trait_scores_a))
 
-site_scores <- boot_traits_bm %>%
-  select(plot:site) %>% 
-  unique() %>% 
-  rename(ID = plot) %>% 
-  right_join(site_scores) %>% 
-  mutate(PC1 = PC1 * -1, 
+site_scores <- boot_traits_bm |>
+  select(plot:site) |>
+  unique() |>
+  rename(ID = plot) |>
+  right_join(site_scores) |>
+  mutate(PC1 = PC1 * -1,
          PC2 = PC2 * -1)
 ```
 
@@ -216,12 +453,12 @@ trait_labs_a <- c("C:N~ratio", "LDMC", "SLA", "delta^13*C", "delta^15*N", "Plant
 names(trait_labs_a) <- c("CN_ratio", "LDMC", "SLA", "d13C", "d15N", "height", "wC",  "wN")
 
 pa <- ggplot() +
-  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_segment(data = trait_scores_a, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = site_scores, aes(x = PC1, y = PC2, color = habitat, shape = treatment), size = 3, stroke = 1, alpha = .8) + # add the point markers
   geom_label(data = trait_scores_a, aes(PC1, PC2, label = trait_labs_a), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
-  #geom_line(data = site_scores, aes(x = PC1, y = PC2, group = site), alpha = 0.3) + 
+  #geom_line(data = site_scores, aes(x = PC1, y = PC2, group = site), alpha = 0.3) +
   #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
   scale_shape_manual(values = c(16, 8)) +
   scale_colour_manual(values = c("#917D53", "#667E4E", "#A8AA97")) +
@@ -229,12 +466,12 @@ pa <- ggplot() +
   xlim(min(trait_scores_a$PC1) * 1.2, max(trait_scores_a$PC1) * 1.1) +
   theme_classic() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1),
         strip.background = element_rect(color = "black", size = 1),
         legend.position = "bottom",
-        legend.box = "vertical",     
-        legend.box.just = "left", 
-        legend.margin = margin(t = -8)) + 
+        legend.box = "vertical",
+        legend.box.just = "left",
+        legend.margin = margin(t = -8)) +
   labs(x = "PC1 (75%)", y = "PC2 (14%)", color = "Habitat", shape = "Treatment"); pa
 
 #ggsave("3_output/1_figures/traits/plot_pca.tif", height = 6, width = 6)
@@ -244,22 +481,22 @@ pa <- ggplot() +
 #| label: calculate species PCAs
 traits <- read_csv("2_data/2_clean/traits/traits_w.csv")
 
-species_traits <- traits %>% 
-  filter(complete.cases(.)) %>% 
-  group_by(species) %>% 
-  summarise(plant_height = mean(height), 
-            LDMC = mean(LDMC), 
-            SLA = mean(SLA), 
-            N = mean(wN), 
-            d15N = mean(d15N), 
-            C = mean(wC), 
-            d13C = mean(d13C), 
-            CN_ratio = mean(CN_ratio)) %>% 
+species_traits <- traits |>
+  drop_na() |>
+  group_by(species) |>
+  summarise(plant_height = mean(height),
+            LDMC = mean(LDMC),
+            SLA = mean(SLA),
+            N = mean(wN),
+            d15N = mean(d15N),
+            C = mean(wC),
+            d13C = mean(d13C),
+            CN_ratio = mean(CN_ratio)) |>
   column_to_rownames(var = "species")
 
 # PCA
-species_pca <- species_traits %>% 
-  scale() %>% 
+species_pca <- species_traits |>
+  scale() |>
   rda()
 
 summary(species_pca)
@@ -269,19 +506,19 @@ species_scores$species <- as.factor(rownames(species_scores))
 trait_scores_b <- as.data.frame(species_pca$CA$v[, 1:2])
 trait_scores_b$trait <- as.factor(rownames(trait_scores_b))
 
-species_scores <- species_scores %>% 
-  left_join(spec_list) %>% 
-  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F")))) 
+species_scores <- species_scores |>
+  left_join(spec_list) |>
+  mutate(group = factor(group, levels = rev(c("eS", "dS", "G", "F"))))
 
 ```
 
 ```{r}
-#| label: species level PCAs 
+#| label: species level PCAs
 trait_labs_b <- c("Plant~height", "LDMC", "SLA",  "'%'~N", "delta^15*N", "'%'~C", "delta^13*C", "C:N~ratio")
 names(trait_labs_b) <- c("plant_height", "LDMC", "SLA",  "wN", "d15N", "wC", "d13C", "CN_ratio")
 
 pb <- ggplot() +
-  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
   geom_segment(data = trait_scores_b, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
   geom_point(data = species_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
@@ -291,13 +528,13 @@ pb <- ggplot() +
   geom_label(data = trait_scores_b, aes(PC1, PC2, label = trait_labs_b), col = "navy", label.size = NA, fill = NA, parse = TRUE) +
   xlim(min(trait_scores_b$PC1) * 1.2, max(trait_scores_b$PC1) * 1.1) +
   theme_classic() +
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1),
         strip.background = element_rect(color = "black", size = 1),
         legend.position = "bottom",
-        legend.margin = margin(t = -8)) + 
+        legend.margin = margin(t = -8)) +
   guides(color = guide_legend(override.aes = list(label = ""), reverse = TRUE, nrow = 2)) +
   labs(x = "PC1 (41%)", y = "PC2 (20%)", color = NULL); pb
-  
+
 #ggsave("3_output/1_figures/traits/species_pca.tif", height = 6, width = 6)
 ```
 
@@ -310,7 +547,7 @@ ggsave("3_output/1_figures/publication_ready/multivariate_traits.tif", height = 
 rm(species_scores, site_scores, trait_scores_a, trait_labs_a, trait_scores_b, trait_labs_b) # cleanup
 ```
 
-## Fig 4. CWMs 
+## Fig 4. CWMs
 ```{r}
 #| label: import bootstrapped CWMs
 boot_traits_bm <- read.csv("2_data/2_clean/traits/bootstrapped_traits_bmWeighted.csv")
@@ -320,29 +557,29 @@ trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^1
 names(trait_labs) <- facet_order
 
 # get model outputs (pairwise)
-boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") %>% 
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+boot_traits_lm <- read.xlsx("3_output/2_statistics/traits/boot_traits_glmmtmb_final_results.xlsx", sheet = "pair_comparison") |>
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) |>
   mutate(trait = factor(trait, levels = facet_order),
          significance = if_else(significance == "", "ns", significance),
-         treatment = "control") %>% 
+         treatment = "control") |>
   select(trait, habitat, treatment, significance)
-  
-trait_ranges <- boot_traits_bm %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
-  group_by(trait) %>%
+
+trait_ranges <- boot_traits_bm |>
+  mutate(trait = factor(trait, levels = facet_order)) |>
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) |>
+  group_by(trait) |>
   summarise(
     trait_min = min(mean, na.rm = TRUE),
     trait_max = max(mean, na.rm = TRUE),
     trait_range = trait_max - trait_min,
     .groups = "drop"
-  )  
+  )
 
-sig_positions <- boot_traits_bm %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>% 
-  left_join(trait_ranges, by = "trait") %>%
-  group_by(trait, habitat) %>%
+sig_positions <- boot_traits_bm |>
+  mutate(trait = factor(trait, levels = facet_order)) |>
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) |>
+  left_join(trait_ranges, by = "trait") |>
+  group_by(trait, habitat) |>
   summarise(
     q1 = quantile(mean, 0.25, na.rm = TRUE),
     q3 = quantile(mean, 0.75, na.rm = TRUE),
@@ -353,27 +590,27 @@ sig_positions <- boot_traits_bm %>%
     y_base = max(upper_whisker, na.rm = TRUE),
     y_pos = y_base + (trait_range * 0.13),
     .groups = "drop"
-  ) %>% 
-  left_join(boot_traits_lm) %>% 
+  ) |>
+  left_join(boot_traits_lm) |>
   distinct()
 ```
 
 
 ```{r}
 #| label: fig 4a. bm weighted CWMs
-pa <- boot_traits_bm %>% 
-  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
-  mutate(trait = factor(trait, levels = facet_order)) %>%
-  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
-  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
-  geom_boxplot() + 
-  geom_text(data = sig_positions, aes(y = y_pos, label = significance), 
+pa <- boot_traits_bm |>
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) |>
+  mutate(trait = factor(trait, levels = facet_order)) |>
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) |>
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) +
+  geom_boxplot() +
+  geom_text(data = sig_positions, aes(y = y_pos, label = significance),
                   position = position_dodge(width = 0)) +
   scale_fill_manual(values = c("#999999", "#4da6ff")) +
   scale_y_continuous(expand = expansion(mult = c(0.1, 0.13))) +
   facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2,
-             labeller = as_labeller(trait_labs, label_parsed)) + 
-  labs(x = "Habitat", y = "Community weighted mean") + 
+             labeller = as_labeller(trait_labs, label_parsed)) +
+  labs(x = "Habitat", y = "Community weighted mean") +
   theme_classic() +
   theme(panel.spacing = unit(.0, "lines"),
         panel.border = element_rect(color = "black", fill = NA, size = 1),
@@ -386,22 +623,22 @@ pa <- boot_traits_bm %>%
 
 ```{r}
 #| label: fig 4b. variance partitioning
-varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
+varpart_r2 <- read.csv("3_output/2_statistics/traits/varpart_r2.csv") |> mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) |> select(!X)
 
-pb <- varpart_r2 %>% 
-  filter(r2 >= 0) %>%
+pb <- varpart_r2 |>
+  filter(r2 >= 0) |>
   ggplot(aes(y = trait, x = r2, fill = var_part)) +
-  geom_col(position = "fill")  + 
+  geom_col(position = "fill")  +
   scale_fill_manual(values = c("#4da6ff", "#999999", "#ff6666")) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") + 
-  labs(y = "Trait", x = parse(text = "R^2")) + 
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") +
+  labs(y = "Trait", x = parse(text = "R^2")) +
   theme_classic() +
   theme(legend.position = "bottom",
-        legend.margin = margin(t = -8), 
-        legend.title = element_blank(), 
-        axis.title.y.right = element_text(angle = 90), 
-        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
+        legend.margin = margin(t = -8),
+        legend.title = element_blank(),
+        axis.title.y.right = element_text(angle = 90),
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) +
   guides(fill = guide_legend(reverse = TRUE)); pb
 ```
 ```{r}
@@ -416,14 +653,14 @@ ggarrange(pa, pb, ncol = 2, labels = c("a", "b"), hjust = c(-1, -16), widths = c
 
 ```{r}
 #| label: export brms results for ESM
-gamma0_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "statistics") %>% 
-  filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F")  
+gamma0_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "statistics") |>
+  filter(habitat == "fen" & group == "eS" |
+           habitat == "heath" & group == "F")
 
-gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "statistics") %>% 
+gamma_stats <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "statistics") |>
   anti_join(gamma0_stats, by = c("habitat", "group"))
 
-stats <- bind_rows(gamma0_stats, gamma_stats) %>% 
+stats <- bind_rows(gamma0_stats, gamma_stats) |>
   arrange(habitat, group)
 
 #write_csv(stats, "3_output/2_statistics/biomass/esm_leafBM_brm_results.csv")
@@ -431,37 +668,37 @@ stats <- bind_rows(gamma0_stats, gamma_stats) %>%
 
 ```{r}
 #| label: plot data
-plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") %>% 
+plot_data <- readxl::read_excel("2_data/1_raw/community/2025/SF_plot_data_2025.xlsx") |>
   select(plot:treatment)
 
-leaf_bm <- community %>% 
-  filter(part == "leaf") %>%
-  na.omit() %>% 
-  group_by(plot, group) %>% 
-  summarise(total_bm = sum(biomass)) %>% 
-  ungroup() %>% 
-  left_join(plot_data) %>% 
+leaf_bm <- community |>
+  filter(part == "leaf") |>
+  na.omit() |>
+  group_by(plot, group) |>
+  summarise(total_bm = sum(biomass)) |>
+  ungroup() |>
+  left_join(plot_data) |>
   relocate(habitat:treatment, .after = plot)
 
 # brm data
 # only hurdle_gamma in case of zeros
-gamma0_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") %>% 
-  filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F")  
+gamma0_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "post_draws") |>
+  filter(habitat == "fen" & group == "eS" |
+           habitat == "heath" & group == "F")
 
-gamma0_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
-  filter(habitat == "fen" & group == "eS" | 
-           habitat == "heath" & group == "F")  
+gamma0_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_0gamma_brm.xlsx", sheet = "marginal_estimates") |>
+  filter(habitat == "fen" & group == "eS" |
+           habitat == "heath" & group == "F")
 
-gamma_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") %>% 
+gamma_draws <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "post_draws") |>
   anti_join(gamma0_draws, by = c("treatment", "habitat", "group"))
-gamma_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") %>% 
+gamma_est <- readxl::read_excel("3_output/2_statistics/biomass/leafBM_gamma_brm.xlsx", sheet = "marginal_estimates") |>
   anti_join(gamma0_est, by = c("treatment", "habitat", "group"))
 
 est <- bind_rows(gamma0_est, gamma_est)
-draws <- bind_rows(gamma0_draws, gamma_draws) %>% 
-  left_join(est %>% 
-              select(treatment:group, .upper)) %>% 
+draws <- bind_rows(gamma0_draws, gamma_draws) |>
+  left_join(est |>
+              select(treatment:group, .upper)) |>
   filter(value <= (.upper * 1.2))
 ```
 
@@ -474,14 +711,14 @@ sig_vals <- rep(c("ns", NA), 15)
 sig_vals[c(15, 17)] <- "*" # headth dS and eS are siggnificant
 est$sig_vals <- sig_vals
 rm(sig_vals)
-est <- est %>%
-  group_by(habitat, group) %>%
-  mutate(sig_pos = max(.upper) * 1.25) %>%
+est <- est |>
+  group_by(habitat, group) |>
+  mutate(sig_pos = max(.upper) * 1.25) |>
   ungroup()
 
-leaf_bm_w <- leaf_bm %>%
-  pivot_wider(names_from = group, values_from = total_bm) %>%
-  mutate(total_bm = rowSums(across(where(is.numeric)))) %>%
+leaf_bm_w <- leaf_bm |>
+  pivot_wider(names_from = group, values_from = total_bm) |>
+  mutate(total_bm = rowSums(across(where(is.numeric)))) |>
   pivot_longer(cols = `F`:total_bm, names_to = "group", values_to = "total_bm")
 
 ggplot() +
@@ -521,7 +758,7 @@ ggplot() +
     expand = expansion(mult = c(0.1, 0.2)),
     labels = function(x) {
       v <- x / 4
-      ifelse(v == round(v), 
+      ifelse(v == round(v),
       formatC(v, format = "f", digits = 0),
             formatC(v, format = "f", digits = 2))
     }
@@ -555,400 +792,42 @@ ggsave(
 ## Fig/Tab s2. within habitat variance partitioning
 ```{r}
 #| label: fig s2. within habitat variance partitioning
-varpart_r2_hbt <- read.csv("3_output/2_statistics/traits/varpart_r2_hbt.csv") %>% mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) %>% select(!X)
+varpart_r2_hbt <- read.csv("3_output/2_statistics/traits/varpart_r2_hbt.csv") |> mutate(trait = factor(trait, levels = rev(c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N"))), var_part = factor(var_part, levels = rev(c("ITV", "covariation", "turnover")))) |> select(!X)
 
 trait_labs <- c("Height", "SLA", "LDMC", "C:N~ratio", "'%'~C", "'%'~N", "delta^13*C", "delta^15*N")
 names(trait_labs) <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
 
-varpart_r2_hbt %>% 
-  filter(r2 >= 0) %>%
+varpart_r2_hbt |>
+  filter(r2 >= 0) |>
   ggplot(aes(y = trait, x = r2, fill = var_part)) +
-  geom_col(position = "fill")  + 
+  geom_col(position = "fill")  +
   scale_fill_manual(values = c("#4da6ff", "#999999", "#ff6666")) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") + 
-  labs(y = "Trait", x = parse(text = "R^2")) + 
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(labels = parse(text = rev(trait_labs)), position = "right") +
+  labs(y = "Trait", x = parse(text = "R^2")) +
   facet_wrap(~ habitat) +
   theme_classic() +
   theme(legend.position = "bottom",
-        legend.margin = margin(t = -8), 
-        legend.title = element_blank(), 
-        axis.title.y.right = element_text(angle = 90), 
-        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
+        legend.margin = margin(t = -8),
+        legend.title = element_blank(),
+        axis.title.y.right = element_text(angle = 90),
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) +
   guides(fill = guide_legend(reverse = TRUE))
 ```
- 
+
 ```{r}
 #| label: tab s2. within habitat variance paritioning
-varpart_pt1 <- varpart_r2 %>% 
+varpart_pt1 <- varpart_r2 |>
   pivot_wider(id_cols = trait, names_from = var_part, values_from = r2)
-varpart_pt1$habitat <- "among" 
-varpart_pt1 %>%
+varpart_pt1$habitat <- "among"
+varpart_pt1 |>
   select(habitat, trait, ITV, covariation, turnover)
 
-varpart_pt2 <- varpart_r2_hbt %>% 
-  pivot_wider(id_cols = c(habitat, trait), names_from = var_part, values_from = r2) %>%
+varpart_pt2 <- varpart_r2_hbt |>
+  pivot_wider(id_cols = c(habitat, trait), names_from = var_part, values_from = r2) |>
   select(habitat, trait, ITV, covariation, turnover)
 
-varparts <- rbind(varpart_pt1, varpart_pt2) %>% 
-  select(habitat, everything()); rm(varpart_pt1, varpart_pt2) 
+varparts <- rbind(varpart_pt1, varpart_pt2) |>
+  select(habitat, everything()); rm(varpart_pt1, varpart_pt2)
 write_csv(varparts, "3_output/2_statistics/traits/esm_varparts.csv")
-```
-
-# total biomass plots
-
-```{r}
-community <- read.csv("2_data/2_clean/sf_community.csv") %>% 
-  mutate(site_id = str_sub(plot, 1, 2)) %>% 
-  select(plot:site, site_id, everything())
-```
-```{r}
-# Step 1 — sum per plot x part
-df_plot_parts <- community %>%
-  mutate(biomass = biomass / 4) %>%
-  group_by(plot, habitat, treatment, part) %>%
-  summarise(
-    biomass_sum = sum(biomass, na.rm = TRUE),
-    .groups     = "drop"
-  ) %>%
-  filter(part %in% c("leaf", "stem"))
-
-# Step 2 — calculate total per plot as leaf + stem
-df_plot_total <- df_plot_parts %>%
-  group_by(plot, habitat, treatment) %>%
-  summarise(
-    biomass_sum = sum(biomass_sum, na.rm = TRUE),
-    .groups     = "drop"
-  ) %>%
-  mutate(part = "total")
-
-# Step 3 — bind parts and total together
-df_total_vascular <- bind_rows(df_plot_parts, df_plot_total) %>%
-  # Step 4 — mean and SE across plots
-  group_by(habitat, treatment, part) %>%
-  summarise(
-    mean_biomass = mean(biomass_sum, na.rm = TRUE),
-    se_biomass   = sd(biomass_sum,   na.rm = TRUE) / sqrt(n()),
-    .groups      = "drop"
-  ) %>%
-  mutate(
-    part_treatment = paste(part, treatment, sep = "_"),
-    habitat        = factor(habitat,
-                            levels = c("fen","heath","ridge"),
-                            labels = c("Fen","Heath","Ridge"))
-  )
-df_total_vascular_total <- df_total_vascular %>% 
-  filter(part == "total") %>%
-  mutate(facet_label = "Total Vascular Biomass")
-
-df_total_vascular_leaf <- df_total_vascular %>% 
-  filter(part == "leaf") %>%
-  mutate(facet_label = "Total Vascular Biomass")
-
-# ============================================================
-# EXTRA PANEL — total vascular biomass
-# ============================================================
-
-p_total_vascular <- ggplot() +
-  # total biomass bars — transparent background
-  geom_col(
-    data = df_total_vascular_total,
-    aes(x = habitat, y = mean_biomass, fill = part_treatment),
-    position = position_dodge(width = 0.9),
-    alpha    = 0.5,
-    width    = 0.9
-  ) +
-  # leaf biomass bars — solid overlay
-  geom_col(
-    data = df_total_vascular_leaf,
-    aes(x = habitat, y = mean_biomass, fill = part_treatment),
-    position = position_dodge(width = 0.9),
-    width    = 0.9
-  ) +
-  # error bars — total
-  geom_errorbar(
-    data = df_total_vascular_total,
-    aes(
-      x     = habitat,
-      ymin  = mean_biomass - se_biomass,
-      ymax  = mean_biomass + se_biomass,
-      group = part_treatment
-    ),
-    position = position_dodge(width = 1.1),
-    width    = 0.25,
-    alpha    = 0.7
-  ) +
-  # error bars — leaf
-  geom_errorbar(
-    data = df_total_vascular_leaf,
-    aes(
-      x     = habitat,
-      ymin  = mean_biomass - se_biomass,
-      ymax  = mean_biomass + se_biomass,
-      group = part_treatment
-    ),
-    position = position_dodge(width = 0.8),
-    width    = 0.25
-  ) +
-  scale_fill_manual(
-    name   = "Plant-part | Treatment",
-    values = c(
-      "total_control"    = "orange3",
-      "total_snowfence"  = "skyblue",
-      "leaf_control"     = "#7A9A3A",
-      "leaf_snowfence"   = "#2FAF9C"
-    ),
-    labels = c(
-      "total_control"    = "Total | Control",
-      "total_snowfence"  = "Total | Snowfence",
-      "leaf_control"     = "Leaf | Control",
-      "leaf_snowfence"   = "Leaf | Snowfence"
-    )
-  ) +
-  #scale_y_continuous(limits = c(0, 100)) +
-  labs(
-    x    = NULL,
-    y    = "Biomass [g/m²]",
-    fill = "Plant-part | Treatment"
-  ) +
-  facet_wrap(
-    ~facet_label
-  )+
-  theme_classic(base_size = 12) +
-  theme(
-    panel.border    = element_rect(color = "grey50", fill = NA, linewidth = 0.5),
-    legend.position = "none"
-  )
-p_total_vascular
-```
-
-```{r}
-#| echo: false
-# Calculate for individual parts AND total
-df_bars <- community %>% 
-  mutate(biomass = biomass / 4) %>% 
-  bind_rows(
-    community %>%
-      mutate(biomass = biomass / 4) %>% 
-      group_by(plot, habitat, treatment,spec,species, family, genus, group) %>%
-      summarise(biomass = sum(biomass, na.rm = TRUE),
-                hits = sum(hits,na.rm=T),.groups = "drop") %>%
-      filter(!is.na(group)) %>%
-      mutate(part = "total")  # Add "total" category
-  ) %>%
-  group_by(plot, habitat, treatment, group, part) %>%
-  summarise(biomass_sum = sum(biomass, na.rm = TRUE), .groups = "drop") %>%
-  filter(!is.na(group)) %>%
-  # Add total by summing stem + leaf per plot
-  
-  # Calculate mean and SE
-  group_by(habitat, treatment, group, part) %>%
-  summarise(
-    mean_biomass = mean(biomass_sum, na.rm = TRUE),
-    se_biomass = sd(biomass_sum, na.rm = TRUE) / sqrt(n()),
-    n = n(),
-    .groups = "drop"
-  ) 
-
-# Plot
-# Add a part_treatment variable for unique fills
-df_bars_combined <- df_bars %>%
-  filter(part %in% c("total", "leaf")) %>%
-  mutate(
-    part_treatment = paste(part, treatment, sep = "_")
-  )
-
-df_total <- df_bars_combined %>% filter(part == "total")
-df_leaf <- df_bars_combined %>% filter(part == "leaf")
-
-biomass_bars <- ggplot() +
-  geom_col(
-    data = df_total,
-    aes(x = group, y = mean_biomass, fill = part_treatment),
-    position = position_dodge(width = 0.9),
-    alpha = 0.5
-  ) +
-
-   geom_col(
-     data = df_leaf,
-     aes(x = group, y = mean_biomass, fill = part_treatment),
-     position = position_dodge(width = 0.9),
-     linewidth = 0.5
-   ) +
-
-   geom_errorbar(
-  data = df_total[df_total$group %in% c("eS", "dS"),],
-  aes(
-    x = group,
-    ymin = mean_biomass - se_biomass,
-    ymax = mean_biomass + se_biomass,
-    group = part_treatment
-  ),
-  position = position_dodge(width = 1.1),
-  width = 0.25,
-  alpha = 0.7
-  )+
-  geom_errorbar(
-  data = df_leaf,
-  aes(
-    x = group,
-    ymin = mean_biomass - se_biomass,
-    ymax = mean_biomass + se_biomass,
-    group = part_treatment
-  ),
-  position = position_dodge(width = 0.8),
-  width = 0.25
-  )+
-  scale_y_continuous(limits = c(0,100))+
-  scale_fill_manual(
-    name   = "Plant-part | Treatment",
-    values = c(
-      "total_control"    = "orange3",
-      "total_snowfence"  = "skyblue",
-      "leaf_control"     = "#7A9A3A",
-      "leaf_snowfence"   = "#2FAF9C"
-    ),
-    labels = c(
-      "total_control"    = "Total | Control",
-      "total_snowfence"  = "Total | Snowfence",
-      "leaf_control"     = "Leaf | Control",
-      "leaf_snowfence"   = "Leaf | Snowfence"
-    )
-  ) +
-  facet_wrap(
-    ~habitat,
-    nrow = 3,
-    strip.position = "right",
-    labeller = labeller(
-      habitat = c(
-        "fen" = "Fen",
-        "ridge" = "Ridge",
-        "heath" = "Heath"
-      )
-    )) +
-  labs(
-    x = "",
-    y = ""
-  ) +
-  theme_classic(base_size = 12)+
-  theme(axis.text.x = element_text(size = 12), 
-        panel.spacing = unit(1, "lines"),
-        panel.border = element_rect(color = "grey50", fill = NA, size = 0.5))
-biomass_bars
-```
-```{r}
-# define shared scale once
-shared_fill <- scale_fill_manual(
-  name   = "Biomass | Treatment",
-  values = c(
-    "total_control"   = "orange3",
-    "total_snowfence" = "skyblue",
-    "leaf_control"    = "#7A9A3A",
-    "leaf_snowfence"  = "#2FAF9C"
-  ),
-  labels = c(
-    "total_control"   = "Total | Control",
-    "total_snowfence" = "Total | Snowfence",
-    "leaf_control"    = "Leaf | Control",
-    "leaf_snowfence"  = "Leaf | Snowfence"
-  )
-)
-
-# keep legend only in biomass_bars
-biomass_bars <- biomass_bars +
-  theme(
-    legend.position      = "bottom",
-    legend.justification = "left",
-    legend.box           = "horizontal",
-    legend.key.size      = unit(0.4, "cm"),
-    legend.text          = element_text(size = 10),
-    legend.margin = margin(0, 0, 0, -100) 
-  ) +
-  guides(fill = guide_legend(nrow = 2))
-
-# no legend in total vascular
-p_total_vascular <- p_total_vascular + 
-   theme(legend.position = "none")
-
-# combine without guides collect
-combined_biomass <- p_total_vascular + biomass_bars +
-  plot_layout(widths = c(1, 3))
-
-print(combined_biomass)
-
-ggarrange(p_total_vascular, biomass_bars)
-
-# 
-ggsave(
-  "../3_plots/combined_biomass.png",
-  plot = combined_biomass,
-  width = 12,
-  height = 6,
-  dpi = 600
-)
-# write.csv(df_bars_combined,
-#           "../3_plots/biomass_table.csv",
-#           row.names = FALSE)
-```
-
-```{r}
-#| label: fig S2b. leaf bm totals
-lbm <- community %>% 
-  mutate(group = factor(group, levels = c("dS", "eS", "F", "G"))) %>% 
-  filter(!is.na(group), 
-         part == "leaf",
-         spec != "Rholap") %>% 
-  #group_by(treatment, habitat, group) %>% 
-  #summarise(biomass = mean(biomass, na.rm = TRUE)) %>% 
-  mutate(
-    biomass = biomass / 4 # convert to g/m2
-  ) %>%
-    group_by(site, treatment, habitat, group) %>%
-  summarise(bm_sum = sum(biomass, na.rm = TRUE), .groups = "drop") %>% 
-    group_by(treatment, habitat, group) %>%
-    summarise(
-      raw_mean = mean(bm_sum, na.rm = TRUE),
-      raw_sd   = sd(bm_sum, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-  
-    pivot_wider(
-      names_from = treatment,
-      values_from = c(raw_mean, raw_sd)
-    ) %>%
-    rename(
-      ctl_mean   = raw_mean_control, 
-      ctl_sd     = raw_sd_control,
-      sf_mean    = raw_mean_snowfence,
-      sf_sd      = raw_sd_snowfence,
-    )
-
-
-tbm <- community %>% 
-  mutate(group = factor(group, levels = c("dS", "eS", "F", "G"))) %>% 
-  filter(!is.na(group)) %>% 
-  pivot_wider(names_from = "part", values_from = "biomass")
-  mutate(
-    bmType = "total",
-    biomass = biomass / 4 # convert to g/m2
-  )
-
-pb <- ggplot() +
-  #geom_col(data = tbm, aes(x = group, y = biomass, fill = treatment, alpha = .5), position = "dodge") + 
-  geom_col(data = lbm, aes(x = group, y = biomass, fill = treatment), position = "dodge") + 
-  facet_wrap(~ habitat, nrow = 3, strip.position = "right", scales = "free_y") + 
-  #scale_fill_manual(values = rev(c("#667c13", "#41532d", "#a3a351", "#6a9174")),
-  #                  labels = c("F" = "forbs", "G" = "graminoids", "dS" = "decid. shrubs", "eS" = "evergr. shrubs")) +
-  scale_y_continuous(expand = expansion(mult = c(0, .1))) + 
-  labs(y = expression(Leaf~biomass~(g~m^{-2})), x = "Treatment") + 
-  theme_classic() +
-  theme(legend.position = "bottom",
-        legend.margin = margin(t = -8), 
-        legend.title = element_blank(),
-        axis.text.x = element_text(angle = 25, hjust = 1), 
-        panel.border = element_rect(color = "black", fill = NA, size = 1)) + 
-  guides(fill = guide_legend(reverse = TRUE, nrow = 2)); pb
-```
-```{r}
-
 ```
