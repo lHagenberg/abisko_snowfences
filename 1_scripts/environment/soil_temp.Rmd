@@ -1,0 +1,331 @@
+---
+title: "soil temperature"
+author: "Liyenne"
+date: "2025-12-04"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: false
+---
+
+# Setup
+```{r}
+#| label: load packages
+pkgs <- c(
+  "tidyverse",
+  "myClim", 
+  # modelling
+  "lme4",
+  "nlme",
+  "glmmTMB",
+  "emmeans",
+  # diagnostics
+  "fitdistrplus",
+  "broom.mixed",
+  "DHARMa"
+)
+
+install.packages(pkgs[!pkgs %in% installed.packages()[, "Package"]])
+lapply(pkgs, library, character.only = TRUE)
+```
+
+```{r}
+#| label: import data
+
+envDat <- read_csv("2_data/1_raw/clim/enviromental_table.csv"); head(envDat, 10)
+
+tmpDat <- read_csv("2_data/1_raw/clim/soil_temperature.csv") |> 
+    select(-1) |> 
+    mutate(
+        date = ymd(datetime),
+        .before = locality_id
+    ); head(tmpDat, 10)
+
+mc_read_data()
+
+```
+
+```{r}
+#| label: exploratory plots
+ 
+tmpDat |>
+  select(datetime, date, vegetation, plot, treatment, value) |>
+  pivot_wider(
+    id_cols = c(datetime, date, plot, vegetation),
+    names_from = "treatment",
+    values_from = "value"
+  ) |>
+mutate(diff = sf - ctl) |>
+  pivot_longer(
+    cols = c(sf:diff),
+    names_to = "treatment",
+    values_to = "value"
+  ) |>
+  group_by(date, vegetation, treatment) |>
+  summarise(
+    meanT = mean(value, na.rm = TRUE),
+    ciH = quantile(value, probs = 0.05, na.rm = TRUE),
+    ciL = quantile(value, probs = 0.95, na.rm = TRUE),
+  ) |>
+  ggplot() +
+  geom_line(aes(x = date, y = meanT, color = treatment)) +
+  geom_ribbon(
+    aes(x = date, ymax = ciH, ymin = ciL, fill = treatment),
+    alpha = 0.5
+  ) +
+  facet_wrap(~vegetation, nrow = 3)
+
+```
+
+# Analysis
+## environmental comparisons
+```{r}
+#| label: check distribution
+
+dist <- fitdist(envDat$DJF, "norm")
+plot(dist)
+ 
+```
+
+```{r}
+#| label: data prep
+ 
+envDat_paired <- envDat |>
+  select(plot_id, everything(), -c(SWE_mm, avg_frost_season)) |>
+  pivot_longer(
+    cols = depth_cm:JJA,
+    names_to = "var",
+    values_to = "mean"
+  ) |>
+  pivot_wider(
+    names_from = treat,
+    values_from = mean
+  ) |>
+  group_by(veg, var, plot_id) |>
+  mutate(diff = SF - C)
+
+```
+
+### snow depth
+```{r}
+#| label: paired t-test
+
+x <- envDat_paired |> # fen
+  filter(veg == "d" & var == "depth_cm")
+results <- t.test(x$diff) |> 
+  glance(fit); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "e" & var == "depth_cm")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "x" & var == "depth_cm")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+results <- results |>
+  mutate(
+    veg = c("x", "e", "d"),
+    var = "depth_cm",
+    .before = estimate
+  )
+
+all_results <- results
+rm(results, x)
+
+```
+
+```{r}
+
+simulationOutput <- simulateResiduals(fittedModel = fit)
+plot(simulationOutput)
+testDispersion(simulationOutput); rm(simulationOutput)
+
+```
+
+### winter temperature
+```{r}
+#| label: model tests
+ 
+x <- envDat_paired |> # fen
+  filter(veg == "d" & var == "DJF")
+results <- t.test(x$diff) |> 
+  glance(fit); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "e" & var == "DJF")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "x" & var == "DJF")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+results <- results |>
+  mutate(
+    veg = c("x", "e", "d"),
+    var = "DJF",
+    .before = estimate
+  )
+
+all_results <- bind_rows(all_results, results)
+rm(results, x)
+
+```
+
+### summer temperature
+```{r}
+#| label: model tests
+ 
+x <- envDat_paired |> # fen
+  filter(veg == "d" & var == "JJA")
+results <- t.test(x$diff) |> 
+  glance(fit); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "e" & var == "JJA")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "x" & var == "JJA")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+results <- results |>
+  mutate(
+    veg = c("x", "e", "d"),
+    var = "JJA",
+    .before = estimate
+  )
+
+all_results <- bind_rows(all_results, results)
+rm(results, x)
+
+```
+
+### growing season
+```{r}
+#| label: model tests
+
+x <- envDat_paired |> # fen
+  filter(veg == "d" & var == "avg_growing_season")
+results <- t.test(x$diff) |> 
+  glance(fit); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "e" & var == "avg_growing_season")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+x <- envDat_paired |> # heath
+  filter(veg == "x" & var == "avg_growing_season")
+results <- t.test(x$diff) |> 
+  glance(fit) |> 
+  bind_rows(results); results
+
+results <- results |>
+  mutate(
+    veg = c("x", "e", "d"),
+    var = "avg_growing_season",
+    .before = estimate
+  )
+
+all_results <- bind_rows(all_results, results)
+rm(results)
+
+```
+
+### descriptives
+```{r}
+#| label: calculate means and sd
+means <- envDat |>
+  select(plot_id, everything(), -c(SWE_mm, avg_frost_season)) |>
+  pivot_longer(
+    cols = depth_cm:JJA,
+    names_to = "var",
+    values_to = "mean"
+  ) |>
+  pivot_wider(
+    names_from = treat,
+    values_from = mean
+  ) |>
+  group_by(veg, var, plot_id) |>
+  mutate(diff = SF - C) |>
+  group_by(veg, var) |>
+  summarise(
+    diff = mean(diff, na.rm = TRUE)
+  )
+
+sds <- envDat |>
+  select(plot_id, everything(), -c(SWE_mm, avg_frost_season)) |>
+  pivot_longer(
+    cols = depth_cm:JJA,
+    names_to = "var",
+    values_to = "mean"
+  ) |>
+  pivot_wider(
+    names_from = treat,
+    values_from = mean
+  ) |>
+  group_by(veg, var) |>
+  summarise(
+    sds = sd(diff, na.rm = TRUE)
+  )
+
+descriptives <- full_join(means, sds)
+rm(means, sds)
+
+```
+
+```{r}
+#| label: write results to csv
+
+all_results <- all_results |> 
+  arrange(veg) |> 
+  left_join(descriptives) |> 
+  select(veg, var, diff, sds, p.value, everything())
+
+write_csv(all_results, "3_output/2_statistics/clim/environmentals_paired_ttest.csv")
+rm(all_results, descriptives)
+
+```
+
+## Tab s2. microclimate
+```{r}
+#| label: data import
+
+envDat <- read_csv("2_data/1_raw/clim/enviromental_table.csv"); head(envDat, 10)
+
+```
+
+```{r}
+#| label: plotting
+envDat |>
+  pivot_longer(
+    cols = c(depth_cm, SWE_mm, avg_growing_season:JJA),
+    names_to = "env_var",
+    values_to = "value"
+  ) |>
+  ggplot(aes(x = veg, y = value, fill = treat)) +
+  geom_boxplot() +
+  facet_wrap2(
+   vars(env_var),
+   scales = "free_y"
+  )
+
+```
